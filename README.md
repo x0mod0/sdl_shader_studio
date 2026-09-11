@@ -4,6 +4,29 @@ A cross-platform desktop tool for writing, testing and packing shaders for the
 SDL 3.4 GPU API. Write HLSL, see it live, and get a pack plus a single-header
 loader you can drop into an SDL project.
 
+<table>
+  <tr>
+    <td width="50%" align="center" valign="top">
+      <img src="assets/screenshots/preview_01.png" alt="Live preview of a multipass bloom pipeline, with the Inputs &amp; Outputs panel">
+      <br><sub><b>Live preview</b> - a multipass bloom pipeline, with its reflected inputs</sub>
+    </td>
+    <td width="50%" align="center" valign="top">
+      <img src="assets/screenshots/preview_02.png" alt="HLSL editor showing a blur pass, with the Build panel below">
+      <br><sub><b>Editor</b> - an HLSL blur pass, its bindings, and the Build panel</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center" valign="top">
+      <img src="assets/screenshots/preview_03.png" alt="Node graph editor generating a fragment shader">
+      <br><sub><b>Node graph</b> - a fragment shader authored as a graph</sub>
+    </td>
+    <td width="50%" align="center" valign="top">
+      <img src="assets/screenshots/preview_04.png" alt="Settings window in the light theme">
+      <br><sub><b>Settings</b> - editor options in the light theme</sub>
+    </td>
+  </tr>
+</table>
+
 ---
 
 ## Contents
