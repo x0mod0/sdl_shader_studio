@@ -4,9 +4,6 @@ A cross-platform desktop tool for writing, testing and packing shaders for the
 SDL 3.4 GPU API. Write HLSL, see it live, and get a pack plus a single-header
 loader you can drop into an SDL project.
 
-The core pipeline, the desktop app, the GLSL front end, the node graph editor
-and the test-only scene layer are all implemented.
-
 ---
 
 ## Contents
