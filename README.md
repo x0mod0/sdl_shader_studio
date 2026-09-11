@@ -298,7 +298,7 @@ another, CMake refuses rather than switching. Delete the directory
 xcode-select --install                 # command line tools, if you have not already
 brew install cmake
 
-cd /Users/algo/Developer/sdl-shader-studio
+cd ~/Developer/sdl-shader-studio
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ctest --test-dir build --output-on-failure
