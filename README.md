@@ -298,7 +298,8 @@ another, CMake refuses rather than switching. Delete the directory
 xcode-select --install                 # command line tools, if you have not already
 brew install cmake
 
-cd ~/Developer/sdl-shader-studio
+# Clone or download the project first, then run the commands below from
+# its root folder (the one containing CMakeLists.txt).
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ctest --test-dir build --output-on-failure
@@ -327,7 +328,8 @@ sudo apt install build-essential cmake git \
 sudo dnf install gcc-c++ cmake git \
      libX11-devel wayland-devel libxkbcommon-devel mesa-libEGL-devel vulkan-devel
 
-cd ~/Developer/sdl-shader-studio
+# Clone or download the project first, then run the commands below from
+# its root folder (the one containing CMakeLists.txt).
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ctest --test-dir build --output-on-failure
@@ -344,7 +346,8 @@ rather than crashing.
 From a **Developer PowerShell for VS 2022**:
 
 ```powershell
-cd C:\dev\sdl-shader-studio
+# Clone or download the project first, then run the commands below from
+# its root folder (the one containing CMakeLists.txt).
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
