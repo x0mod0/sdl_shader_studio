@@ -106,7 +106,7 @@ check_environment() {
 
     command -v git >/dev/null 2>&1 ||
         die "git is not installed (or not on PATH)." \
-            "CMake fetches SDL3, SDL_shadercross, Dear ImGui and toml++ with it when they" \
+            "CMake fetches SDL3, SDL_shadercross and toml++ with it when they" \
             "are not already installed." \
             "  $(install_hint git git git)"
 

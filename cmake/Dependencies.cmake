@@ -6,6 +6,13 @@
 include(FetchContent)
 set(FETCHCONTENT_QUIET OFF)
 
+# Files unpacked from a URL download get the time they were unpacked rather than
+# the time stored in the archive, so moving a dependency always rebuilds it.
+# CMake before 3.24 has no such policy and needs nothing here.
+if(POLICY CMP0135)
+    cmake_policy(SET CMP0135 NEW)
+endif()
+
 # --- toml++ (manifest and settings) ----------------------------------------
 find_package(tomlplusplus QUIET)
 if(NOT tomlplusplus_FOUND)
@@ -73,10 +80,14 @@ if(SSSTUDIO_WITH_SHADERCROSS)
     find_package(SDL3_shadercross QUIET CONFIG)
     set(ssstudio_shadercross_prebuilt ${SDL3_shadercross_FOUND})
     if(NOT SDL3_shadercross_FOUND)
+        # Pinned to a commit on main rather than main itself, so a clean configure
+        # always builds the same compiler. That also pins SPIRV-Cross, DXC and the
+        # other submodules, whose exact revisions the commit records. Not shallow:
+        # a shallow clone only reaches branch and tag tips, and this repository is
+        # small enough that the full history costs nothing.
         FetchContent_Declare(SDL3_shadercross
             GIT_REPOSITORY https://github.com/libsdl-org/SDL_shadercross.git
-            GIT_TAG main
-            GIT_SHALLOW TRUE)
+            GIT_TAG 1ff05bec573988a98ef9e0260b4da44f512b8367) # main, 2026-09-03
         set(SDLSHADERCROSS_VENDORED ON CACHE BOOL "" FORCE)
         set(SDLSHADERCROSS_CLI OFF CACHE BOOL "" FORCE)
         FetchContent_MakeAvailable(SDL3_shadercross)
@@ -247,11 +258,17 @@ if(SSSTUDIO_BUILD_GUI AND SSSTUDIO_WITH_IMAGES)
 endif()
 
 # --- Dear ImGui (docking branch) --------------------------------------------
+#
+# Pinned to a docking-branch commit (1.93.0 WIP, 2026-09-07), which is newer than
+# the last v*-docking tag. It is downloaded as a source archive rather than
+# cloned: the repository carries over 100 MB of history against a 2 MB archive,
+# and URL_HASH fails the build if the download is ever not what was reviewed.
+# To move it, change the commit in the URL and replace the hash with what
+# `shasum -a 256` reports for the new archive.
 if(SSSTUDIO_BUILD_GUI)
     FetchContent_Declare(imgui
-        GIT_REPOSITORY https://github.com/ocornut/imgui.git
-        GIT_TAG docking
-        GIT_SHALLOW TRUE)
+        URL https://github.com/ocornut/imgui/archive/a2b7d6e7928e92a0b764d7bd8f3faceb660e60a7.tar.gz
+        URL_HASH SHA256=4780fa950e2ceb4f2bdb1c9b71d5bbe6d8e7aa286635ee363819598db7de29bf)
     FetchContent_MakeAvailable(imgui)
 
     set(IMGUI_INCLUDE_DIRS

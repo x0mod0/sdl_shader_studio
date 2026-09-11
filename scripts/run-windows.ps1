@@ -87,7 +87,7 @@ function Get-Toolchain {
 
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
         Stop-WithError 'git is not installed (or not on PATH).' @(
-            'CMake fetches SDL3, SDL_shadercross, Dear ImGui and toml++ with it when they',
+            'CMake fetches SDL3, SDL_shadercross and toml++ with it when they',
             'are not already installed.',
             'Install it with:  winget install Git.Git')
     }
