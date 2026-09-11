@@ -1,0 +1,100 @@
+# multipass-bloom - SDL Shader Studio project
+# Sources live next to this file; only non-default settings are stored here.
+
+[project]
+name = "multipass-bloom"
+format_version = 3
+default_language = "hlsl"
+
+[[shaders]]
+id = "fullscreen_vert"
+path = "shaders/fullscreen.vert.hlsl"
+stage = "vertex"
+key = 2371487362
+
+[[shaders]]
+id = "trails_frag"
+path = "shaders/trails.frag.hlsl"
+stage = "fragment"
+key = 1099991021
+
+[[shaders]]
+id = "blur_frag"
+path = "shaders/blur.frag.hlsl"
+stage = "fragment"
+key = 2598692085
+
+[[shaders]]
+id = "composite_frag"
+path = "shaders/composite.frag.hlsl"
+stage = "fragment"
+key = 2903942545
+
+[bindings.blur_frag.uniforms]
+"Blur.radius" = { source = "manual", value = [2.5] }
+"Blur.resolution" = { source = "macro", text = "resolution" }
+"Blur.threshold" = { source = "manual", value = [1] }
+
+[bindings.blur_frag.textures]
+"source" = { source = "pass_output", text = "trails_frag" }
+
+[bindings.composite_frag.uniforms]
+"Frame.bloom_strength" = { source = "manual", value = [0.9] }
+"Frame.exposure" = { source = "manual", value = [1] }
+"Frame.resolution" = { source = "macro", text = "resolution" }
+
+[bindings.composite_frag.textures]
+"bloom" = { source = "pass_output", text = "blur_frag" }
+"scene" = { source = "pass_output", text = "trails_frag" }
+
+[bindings.trails_frag.uniforms]
+"Frame.delta_time" = { source = "macro", text = "delta_time" }
+"Frame.resolution" = { source = "macro", text = "resolution" }
+"Frame.time" = { source = "macro", text = "time" }
+
+[bindings.trails_frag.textures]
+"feedback" = { source = "previous_frame", text = "trails_frag" }
+
+[[profiles]]
+name = "debug"
+formats = ["spirv"]
+output_dir = "build"
+pack_basename = "shaders"
+shader_extension = ".bin"
+compression = "none"
+key_strategy = "explicit"
+optimization = 0
+debug_info = true
+emit = ["pack", "header", "loader", "docs"]
+
+[[profiles]]
+name = "release"
+formats = ["spirv", "dxil", "msl"]
+output_dir = "build"
+pack_basename = "shaders"
+shader_extension = ".bin"
+compression = "lz4"
+key_strategy = "explicit"
+emit = ["pack", "header", "loader", "docs"]
+
+[[pipelines]]
+name = "Bloom"
+vertex = "fullscreen_vert"
+fragment = "composite_frag"
+
+[[pipelines.passes]]
+shader = "trails_frag"
+format = "rgba16f"
+
+[[pipelines.passes]]
+shader = "blur_frag"
+format = "rgba16f"
+
+[preview]
+width = 956
+height = 537
+follow_panel = true
+blend = false
+speed = 1
+pipeline = "Bloom"
+clear_color = [0.02, 0.02, 0.03, 1]

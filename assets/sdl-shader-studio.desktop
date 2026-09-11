@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Version=1.5
+Name=SDL Shader Studio
+GenericName=Shader Editor
+Comment=Author, preview and pack SDL GPU shaders
+Exec=sdl-shader-studio %f
+TryExec=sdl-shader-studio
+Icon=sdl-shader-studio
+Terminal=false
+Categories=Development;IDE;Graphics;
+Keywords=shader;hlsl;glsl;spirv;sdl;gpu;
+MimeType=application/x-sdl-shader-studio-project;
+StartupNotify=true
+StartupWMClass=SDL Shader Studio

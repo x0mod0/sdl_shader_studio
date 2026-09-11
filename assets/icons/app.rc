@@ -1,0 +1,14 @@
+// Windows application icon.
+//
+// Compiled into the executable by cmake/AppIcon.cmake. app.ico is generated
+// from square/icon-*.png by tools/make_ico.py and checked in, so building on
+// Windows needs no image tooling.
+
+// Explorer, the taskbar and the Alt-Tab switcher show the numerically lowest
+// icon resource, so this one has to be 1.
+1 ICON "app.ico"
+
+// SDL registers its window class with an icon resource named SDL_icon and
+// falls back to resource 1 otherwise; the alias costs a little size and makes
+// the window icon correct whichever of the two the linked SDL looks for.
+SDL_icon ICON "app.ico"

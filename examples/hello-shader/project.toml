@@ -1,0 +1,67 @@
+# hello - SDL Shader Studio project
+# Sources live next to this file; only non-default settings are stored here.
+
+[project]
+name = "hello"
+format_version = 3
+default_language = "hlsl"
+
+[[shaders]]
+id = "sprite_vert"
+path = "shaders/sprite.vert.hlsl"
+stage = "vertex"
+key = 3699809902
+
+[[shaders]]
+id = "sprite_frag"
+path = "shaders/sprite.frag.hlsl"
+stage = "fragment"
+key = 3032078713
+
+[bindings.sprite_frag.uniforms]
+"Frame._pad" = { source = "default" }
+"Frame.resolution" = { source = "macro", text = "resolution" }
+"Frame.time" = { source = "macro", text = "time" }
+"Frame.tint" = { source = "manual", value = [1, 1, 1, 1] }
+
+[bindings.sprite_vert.uniforms]
+"Transform.mvp" = { source = "default" }
+
+[macros]
+pulse = "sin(time*2)*0.5+0.5"
+
+[[profiles]]
+name = "debug"
+formats = ["spirv"]
+output_dir = "build"
+pack_basename = "shaders"
+shader_extension = ".bin"
+compression = "none"
+key_strategy = "explicit"
+optimization = 0
+debug_info = true
+emit = ["pack", "header", "loader", "docs"]
+
+[[profiles]]
+name = "release"
+formats = ["spirv", "dxil", "msl"]
+output_dir = "build"
+pack_basename = "shaders"
+shader_extension = ".bin"
+compression = "lz4"
+key_strategy = "explicit"
+emit = ["pack", "header", "loader", "docs"]
+
+[[pipelines]]
+name = "Default"
+vertex = "sprite_vert"
+fragment = "sprite_frag"
+
+[preview]
+width = 1012
+height = 537
+follow_panel = true
+blend = false
+speed = 1.28
+pipeline = "Default"
+clear_color = [0.05, 0.05, 0.07, 1]

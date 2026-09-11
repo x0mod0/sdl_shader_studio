@@ -1,0 +1,64 @@
+# A worked example of the theme pack format, and the shape a generated theme
+# should have: a small palette, twenty roles derived from it, and almost nothing
+# else. See docs/THEME_PACK_FORMAT.md.
+
+[pack]
+format = 1
+name = "Midnight"
+author = "SDL Shader Studio"
+version = "1.0.0"
+inherit = "dark"
+appearance = "dark"
+description = "Cool, low-contrast dark theme for long sessions."
+
+[palette]
+void   = "#0e1016"
+slate  = "#161922"
+steel  = "#1f2430"
+mist   = "#c8cede"
+ice    = "#7aa2f7"
+mint   = "#7fdbca"
+amber  = "#e0af68"
+rose   = "#f7768e"
+
+[roles]
+"surface.base"    = "$palette.void"
+"surface.raised"  = "$palette.slate"
+"surface.sunken"  = "darken($palette.void, 2%)"
+"surface.overlay" = "alpha($palette.void, 70%)"
+"ink.primary"     = "$palette.mist"
+"ink.muted"       = "mix($palette.mist, $palette.slate, 38%)"
+"line.subtle"     = "$palette.steel"
+"line.strong"     = "lighten($palette.steel, 10%)"
+accent            = "$palette.ice"
+"accent.hover"    = "lighten($palette.ice, 6%)"
+"accent.active"   = "darken($palette.ice, 8%)"
+"accent.muted"    = "alpha($palette.ice, 30%)"
+"accent.ink"      = "$palette.void"
+"select.bg"       = "alpha($palette.ice, 32%)"
+"status.ok"       = "$palette.mint"
+"status.warn"     = "$palette.amber"
+"status.error"    = "$palette.rose"
+"status.info"     = "$palette.ice"
+
+[syntax]
+plain        = "$palette.mist"
+comment      = "$roles.ink.muted"
+preprocessor = "$palette.amber"
+keyword      = "#c792ea"
+type         = "$palette.ice"
+intrinsic    = "$palette.mint"
+number       = "#f78c6c"
+string       = "#c3e88d"
+operator     = "mix($palette.mist, $palette.slate, 35%)"
+identifier   = "$palette.mist"
+
+# The tab bar is the one place this theme wants a colour its roles do not
+# already produce: a selected tab reads better as a raised surface than as the
+# accent, which is loud on every tab in a row of them.
+[colors]
+TabSelected = "$palette.steel"
+
+[style]
+frame_rounding = 4.0
+tab_rounding = 4.0

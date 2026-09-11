@@ -1,0 +1,77 @@
+# Texture arrays - SDL Shader Studio project
+# Sources live next to this file; only non-default settings are stored here.
+
+[project]
+name = "Texture arrays"
+format_version = 3
+default_language = "hlsl"
+
+[[shaders]]
+id = "fullscreen_vert"
+path = "shaders/fullscreen.vert.hlsl"
+stage = "vertex"
+key = 2371487362
+
+[[shaders]]
+id = "hlsl_array"
+path = "shaders/hlsl_array.frag.hlsl"
+stage = "fragment"
+key = 1600694200
+
+[[shaders]]
+id = "glsl_array"
+path = "shaders/glsl_array.frag.glsl"
+stage = "fragment"
+language = "glsl"
+key = 2536570459
+
+[bindings.glsl_array.textures]
+"channels[0]" = { source = "file", path = "assets/one_red.png" }
+"channels[1]" = { source = "file", path = "assets/two_green.png" }
+"channels[2]" = { source = "file", path = "assets/three_blue.png", wrap = "repeat" }
+
+[bindings.hlsl_array.textures]
+"channels[0]" = { source = "file", path = "assets/one_red.png" }
+"channels[1]" = { source = "file", path = "assets/two_green.png" }
+"channels[2]" = { source = "file", path = "assets/three_blue.png", wrap = "repeat" }
+
+[[profiles]]
+name = "debug"
+formats = ["spirv", "msl"]
+output_dir = "build"
+pack_basename = "shaders"
+shader_extension = ".bin"
+compression = "none"
+key_strategy = "explicit"
+optimization = 0
+debug_info = true
+emit = ["pack", "header", "loader", "docs"]
+
+[[profiles]]
+name = "release"
+formats = ["spirv"]
+output_dir = "build"
+pack_basename = "shaders"
+shader_extension = ".bin"
+compression = "lz4"
+key_strategy = "explicit"
+emit = ["pack", "header", "loader", "docs"]
+
+[[pipelines]]
+name = "HLSL array"
+vertex = "fullscreen_vert"
+fragment = "hlsl_array"
+
+[[pipelines]]
+name = "GLSL array"
+vertex = "fullscreen_vert"
+fragment = "glsl_array"
+
+[preview]
+width = 970
+height = 537
+follow_panel = true
+blend = false
+speed = 1
+pipeline = "HLSL array"
+clear_color = [0.05, 0.05, 0.07, 1]

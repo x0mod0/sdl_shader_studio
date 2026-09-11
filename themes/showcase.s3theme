@@ -1,0 +1,318 @@
+# showcase.s3theme - every option the theme pack format has, in one file.
+#
+# This is the reference pack: a working theme that also names every key you can
+# set, so you can copy a section out of here instead of reading the spec. It
+# lints clean, so it is also a sane starting point - copy it, rename it, and
+# start changing colours.
+#
+# The full specification is docs/THEME_PACK_FORMAT.md. The short version is in
+# the README beside this file.
+#
+# Two things worth knowing before you read on:
+#
+#   * Almost nothing here is required. A pack needs only [pack]; every key below
+#     has a documented default, and a pack that sets twenty roles gets all
+#     sixty-three widget colours derived from them.
+#   * This file sets far more than a real theme should. The [colors] section in
+#     particular is listed in full and left commented out, because every entry
+#     you uncomment is a colour that stops tracking your own roles.
+
+[pack]
+format = 1                    # the only compatibility gate; 1 is this format
+name = "Showcase"             # shown in the picker; the id comes from the filename
+author = "SDL Shader Studio"
+version = "1.0.0"
+inherit = "dark"              # "dark" | "light" | "classic" | another pack id
+appearance = "dark"           # pairs the fallback syntax palette; inferred when absent
+description = "Every theming option in one file, as a working theme."
+homepage = "https://github.com/x0mod0/sdl-shader-studio"  # displayed, never fetched
+
+# ---------------------------------------------------------------------------
+# [palette] - the colours this theme is made of.
+#
+# Hex only: the palette is the ground the rest of the cascade stands on. Name
+# entries for what they *are*, not for what they do - "abyss" survives being
+# reassigned, "button_colour" does not. Three-digit hex expands (#abc = #aabbcc)
+# and an eight-digit value carries its own alpha.
+# ---------------------------------------------------------------------------
+[palette]
+abyss    = "#0b1016"
+trench   = "#141b24"
+reef     = "#1e2732"
+foam     = "#c9d3e0"
+current  = "#6ea8fe"
+kelp     = "#7fdba4"
+sand     = "#e2b169"
+coral    = "#f4778d"
+
+# ---------------------------------------------------------------------------
+# [roles] - the twenty semantic slots. This is the layer to work in.
+#
+# Values may be hex, a $reference, or one of four transforms: alpha(c, P%),
+# lighten(c, P%), darken(c, P%), mix(a, b, P%). References are $role,
+# $roles.name or $palette.name; a bare $name looks in roles first. Transforms
+# nest up to four deep, and lighten/darken move perceptual lightness, so one
+# step is one visible step whatever the hue.
+# ---------------------------------------------------------------------------
+[roles]
+"surface.base"     = "$palette.abyss"   # the window ground; everything else is judged against it
+"surface.raised"   = "$palette.trench"   # panels, popups, tooltips, menu bar, table headers
+"surface.sunken"   = "darken($palette.abyss, 2%)"   # input fields, the editor's text ground
+"surface.overlay"  = "alpha($palette.abyss, 72%)"   # modal dim - the only role that wants alpha
+"ink.primary"      = "$palette.foam"
+"ink.muted"        = "mix($palette.foam, $palette.trench, 34%)"   # disabled text, line numbers, hints
+"ink.inverted"     = "$palette.abyss"   # text on an accent fill; omit it and the higher-contrast
+                     # of surface.base and ink.primary is chosen for you
+"line.subtle"      = "$palette.reef"   # borders, separators, tree lines
+"line.strong"      = "lighten($palette.reef, 12%)"   # focus outlines, scrollbar grabs, strong table borders
+accent             = "$palette.current"   # buttons, headers, sliders, the selected tab
+"accent.hover"     = "lighten($palette.current, 7%)"
+"accent.active"    = "darken($palette.current, 7%)"
+"accent.muted"     = "alpha($palette.current, 28%)"   # docking preview, unsaved marker, alt table rows
+"accent.ink"       = "$palette.foam"   # check marks, links, the selected tab's overline
+"select.bg"        = "alpha($palette.current, 34%)"
+"select.ink"       = "$palette.foam"   # text inside a selection; the editor honours this
+"status.ok"        = "$palette.kelp"
+"status.warn"      = "$palette.sand"
+"status.error"     = "$palette.coral"
+"status.info"      = "$palette.current"
+
+# ---------------------------------------------------------------------------
+# [syntax] - the ten token kinds the editor colours.
+#
+# Keyed by the same names the [editor.syntax] block of settings.toml uses, so
+# colours move between the two by copy and paste. Any kind you leave out comes
+# from the fallback palette in Settings. Alpha is ignored: the editor draws
+# text, and a half-transparent keyword reads as a rendering bug.
+# ---------------------------------------------------------------------------
+[syntax]
+plain        = "$palette.foam"
+comment      = "$roles.ink.muted"   # the one kind held to a lower contrast bar, by design
+preprocessor = "$palette.sand"
+keyword      = "#c792ea"   # a literal, because no role means "keyword purple"
+type         = "$palette.current"
+intrinsic    = "$palette.kelp"   # what the driver provides, as opposed to what you wrote
+number       = "#f78c6c"
+string       = "#c3e88d"
+operator     = "mix($palette.foam, $palette.trench, 30%)"
+identifier   = "$palette.foam"   # same ink as plain text on purpose: everything you named
+
+# ---------------------------------------------------------------------------
+# [diagnostics] - the severity ink, everywhere the app reports something.
+#
+# One place decides the colour of an error in the editor's gutter, the build
+# panel, a form and the graph. Defaults track status.* from [roles], so most
+# themes never write this section at all.
+# ---------------------------------------------------------------------------
+[diagnostics]
+error   = "$roles.status.error"
+warning = "$roles.status.warn"
+info    = "$roles.status.info"
+success = "$roles.status.ok"
+
+# ---------------------------------------------------------------------------
+# [graph] - the node editor, which draws with its own list.
+# ---------------------------------------------------------------------------
+[graph]
+canvas               = "darken($palette.abyss, 2%)"   # behind the nodes
+grid                 = "alpha($palette.foam, 6%)"
+node_bg              = "alpha($palette.trench, 94%)"   # alpha matters here: the grid shows through
+node_border          = "alpha(#000000, 55%)"
+node_border_selected = "$palette.sand"
+node_title           = "$palette.foam"   # the text on a node's coloured header band
+node_label           = "$roles.ink.muted"   # pin names beside their dots
+wire                 = "$roles.line.strong"
+wire_active          = "$roles.accent"
+pin_unconnected      = "$palette.reef"   # a pin with nothing plugged into it
+
+# Keyed by PinType, spelled the way the rest of the app spells it - so the
+# matrix pin is float4x4, not matrix4. A type this build does not know about
+# is a warning and nothing else, so a pack stays loadable on an older copy.
+[graph.pins]
+float     = "#a0c8ff"
+float2    = "#8ce6be"
+float3    = "#e6c882"
+float4    = "#f0a0aa"
+int       = "#b9c0cc"
+bool      = "#c8a0f0"
+float4x4  = "#b4b4b4"
+texture2d = "#78dcf0"
+sampler   = "#9fd8a8"
+any       = "#bebebe"
+
+# Keyed by NodeCategory: the coloured band across the top of a node.
+[graph.nodes]
+input   = "#2f4a68"
+math    = "#354357"
+utility = "#385444"
+color   = "#5f3f4d"
+control = "#584d30"
+custom  = "#4e3862"
+output  = "#664434"
+unknown = "#3a3a44"
+
+# ---------------------------------------------------------------------------
+# [preview] - chrome around the output, never the output itself.
+#
+# The clear colour behind your shader belongs to the project, not to a theme:
+# it changes the picture rather than the frame. The checkerboard is drawn behind
+# the image, so it shows through wherever the shader wrote alpha.
+# ---------------------------------------------------------------------------
+[preview]
+checker_a    = "#232b35"        # the two squares of the transparency check
+checker_b    = "#1b222b"
+checker_size = 8.0              # pixels, 4 - 32
+border       = "$roles.line.subtle"   # the edge of the output rectangle
+stats_ink    = "$roles.ink.muted"     # the size / fps / status line under it
+
+# ---------------------------------------------------------------------------
+# [style] - geometry. Independent of colour, and most themes are only colour.
+#
+# Every value is clamped to a documented range and applied before the UI scale,
+# so write unscaled numbers and the user's scale multiplies them. The ranges are
+# in docs/THEME_PACK_FORMAT.md; a value outside one is clamped with a warning
+# rather than honoured.
+# ---------------------------------------------------------------------------
+[style]
+alpha                       = 1.0             # 0.2 - 1.0
+disabled_alpha              = 0.55            # 0.1 - 1.0
+window_padding              = [10, 10]        # 0.0 - 32.0
+window_rounding             = 6.0             # 0.0 - 16.0
+window_border_size          = 1.0             # 0.0 - 3.0
+window_min_size             = [64, 64]        # 32.0 - 512.0
+window_title_align          = [0.0, 0.5]      # 0.0 - 1.0
+window_menu_button_position = "none"          # none | left | right | up | down
+child_rounding              = 5.0             # 0.0 - 16.0
+child_border_size           = 1.0             # 0.0 - 3.0
+popup_rounding              = 6.0             # 0.0 - 16.0
+popup_border_size           = 1.0             # 0.0 - 3.0
+frame_padding               = [8, 5]          # 0.0 - 24.0
+frame_rounding              = 5.0             # 0.0 - 16.0
+frame_border_size           = 1.0             # 0.0 - 3.0
+item_spacing                = [8, 6]          # 0.0 - 24.0
+item_inner_spacing          = [6, 4]          # 0.0 - 24.0
+cell_padding                = [6, 3]          # 0.0 - 24.0
+indent_spacing              = 21.0            # 0.0 - 48.0
+scrollbar_size              = 12.0            # 6.0 - 24.0
+scrollbar_rounding          = 5.0             # 0.0 - 16.0
+grab_min_size               = 10.0            # 4.0 - 32.0
+grab_rounding               = 5.0             # 0.0 - 16.0
+image_rounding              = 4.0             # 0.0 - 16.0
+tab_rounding                = 5.0             # 0.0 - 16.0
+tab_border_size             = 0.0             # 0.0 - 3.0
+tab_bar_border_size         = 1.0             # 0.0 - 4.0
+tab_bar_overline_size       = 2.0             # 0.0 - 4.0
+menu_item_rounding          = 4.0             # 0.0 - 16.0
+separator_size              = 1.0             # 1.0 - 4.0
+separator_text_border_size  = 1.0             # 0.0 - 4.0
+tree_lines_size             = 1.0             # 0.0 - 3.0
+tree_lines_rounding         = 4.0             # 0.0 - 16.0
+button_text_align           = [0.5, 0.5]      # 0.0 - 1.0
+selectable_text_align       = [0.0, 0.0]      # 0.0 - 1.0
+input_text_cursor_size      = 1.0             # 1.0 - 4.0
+color_button_position       = "right"         # none | left | right | up | down
+
+# ---------------------------------------------------------------------------
+# [font] - a pack may carry a font and suggest it.
+#
+# Commented out because it needs the *directory* form of a pack: paths are
+# relative to the pack's own directory, and a single file has none. To use it,
+# turn this pack into a directory:
+#
+#     themes/showcase.s3theme/
+#       theme.toml                 <- this file, renamed
+#       fonts/YourFont.ttf
+#
+# A path may not contain ".." or a leading separator: a pack that reads someone
+# else's home directory works on exactly one machine. The user's own font
+# setting always wins, because a font choice is often an accessibility choice.
+#
+# [font]
+# ui = "fonts/YourFont.ttf"
+# editor = "fonts/YourMonoFont.ttf"
+# ui_size = 15.0            # a suggestion; the UI scale still multiplies it
+# editor_size = 15.0        # honoured only when the user has not set a size
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# [colors] - the sixty-three widget colours, by ImGui's own name.
+#
+# You almost certainly do not want this section. Every one of these has a
+# derivation from the roles above, which is what makes a theme coherent: change
+# `accent` and twelve widgets follow it. Each entry you uncomment is one colour
+# that stops following anything.
+#
+# Listed in full anyway, because when a derivation *is* wrong for your theme,
+# the thing you need is the exact name to override - spelled as ImGui spells it,
+# with the ImGuiCol_ prefix dropped. Names ImGui has retired still work
+# (TabActive, TabUnfocused, TabUnfocusedActive, NavHighlight).
+#
+# The two below are uncommented as a demonstration: a selected tab reads better
+# here as a raised surface than as the accent, which is loud across a whole row
+# of tabs.
+# ---------------------------------------------------------------------------
+[colors]
+TabSelected = "$palette.reef"
+TabHovered  = "lighten($palette.reef, 6%)"
+
+# Text = ""
+# TextDisabled = ""
+# WindowBg = ""
+# ChildBg = ""
+# PopupBg = ""
+# Border = ""
+# BorderShadow = ""
+# FrameBg = ""
+# FrameBgHovered = ""
+# FrameBgActive = ""
+# TitleBg = ""
+# TitleBgActive = ""
+# TitleBgCollapsed = ""
+# MenuBarBg = ""
+# ScrollbarBg = ""
+# ScrollbarGrab = ""
+# ScrollbarGrabHovered = ""
+# ScrollbarGrabActive = ""
+# CheckMark = ""
+# CheckboxSelectedBg = ""
+# SliderGrab = ""
+# SliderGrabActive = ""
+# Button = ""
+# ButtonHovered = ""
+# ButtonActive = ""
+# Header = ""
+# HeaderHovered = ""
+# HeaderActive = ""
+# Separator = ""
+# SeparatorHovered = ""
+# SeparatorActive = ""
+# ResizeGrip = ""
+# ResizeGripHovered = ""
+# ResizeGripActive = ""
+# InputTextCursor = ""
+# Tab = ""
+# TabSelectedOverline = ""
+# TabDimmed = ""
+# TabDimmedSelected = ""
+# TabDimmedSelectedOverline = ""
+# DockingPreview = ""
+# DockingEmptyBg = ""
+# PlotLines = ""
+# PlotLinesHovered = ""
+# PlotHistogram = ""
+# PlotHistogramHovered = ""
+# TableHeaderBg = ""
+# TableBorderStrong = ""
+# TableBorderLight = ""
+# TableRowBg = ""
+# TableRowBgAlt = ""
+# TextLink = ""
+# TextSelectedBg = ""
+# TreeLines = ""
+# DragDropTarget = ""
+# DragDropTargetBg = ""
+# UnsavedMarker = ""
+# NavCursor = ""
+# NavWindowingHighlight = ""
+# NavWindowingDimBg = ""
+# ModalWindowDimBg = ""
