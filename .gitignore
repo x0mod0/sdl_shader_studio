@@ -70,3 +70,19 @@ Testing/
 
 # macOS Finder metadata
 .DS_Store
+
+# Editor autosaves, written beside the file being edited
+*.autosave
+
+# Claude Code session config (launch.json points at a per-session scratch
+# directory). Re-include shared files with e.g. !.claude/settings.json
+.claude/
+
+# Secrets and signing material - these never belong in the repository
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+*.mobileprovision
