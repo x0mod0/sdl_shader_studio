@@ -28,6 +28,8 @@
 #include "ssstudio/shader_import.h"
 
 #include "file_dialog.h"
+#include "fonts.h"
+#include "widgets.h"
 #include "scene/scene.h"
 
 namespace ssstudio::gui {
@@ -63,6 +65,8 @@ struct Document {
     std::filesystem::file_time_type disk_time{};
     bool external_change_pending = false;
     int cursor_line = 1;
+    /// The caret's column on that line, 1-based, for the status bar.
+    int cursor_column = 1;
 
     std::vector<std::string> undo_snapshots;
     std::size_t undo_cursor = 0;
@@ -223,6 +227,11 @@ public:
     bool init(SDL_Window* window, SDL_GPUDevice* device);
     void shutdown();
 
+    /// Called once per frame before ImGui::NewFrame(): the one point where the
+    /// font atlas can be changed without a frame half-built around the old
+    /// fonts. Loads whatever apply_current_theme() or a font setting asked for.
+    void before_frame();
+
     // Called once per frame between ImGui::NewFrame() and ImGui::Render().
     void frame(float delta_seconds);
 
@@ -352,8 +361,18 @@ public:
 
     /// Resolves settings_.editor.color_theme and hands it to ImGui. Also
     /// refreshes the syntax colours the user has not pinned, which is what
-    /// makes a theme change apply to the editor as well as to the chrome.
+    /// makes a theme change apply to the editor as well as to the chrome, and
+    /// asks for the theme's fonts (see request_fonts()).
     void apply_current_theme();
+
+    /// Asks for the fonts the active theme names, with the user's own editor
+    /// font winning over the theme's. They are loaded before the next frame,
+    /// not now: this is usually called from inside one.
+    void request_fonts();
+
+    /// Every installed theme resolved, built-in ones first, for pages that show
+    /// what each would look like. Rebuilt by reload_theme_packs().
+    const std::vector<ResolvedTheme>& theme_previews();
 
     /// Drops remembered editor state for projects that have fallen off both the
     /// recent list and the open list. There is no way back to those from inside
@@ -635,8 +654,18 @@ public:
 
 private:
     void register_actions();
+    /// The 40px bar across the top of the window: the menus, one pill per
+    /// open project, the build profile and the Build button. A viewport side
+    /// bar, so the dock host below it is given only what is left.
+    void draw_top_bar(const ThemeInk& ink);
+    /// The menus, drawn into the top bar's menu bar.
     void draw_menu_bar();
-    void draw_project_tabs();
+    /// The open projects as pills, from the cursor to `right_edge`. Replaces
+    /// the tab row that used to sit between the menus and the panels.
+    void draw_project_tabs(const ThemeInk& ink, float right_edge);
+    /// The profile picker and the primary Build button at the right of the
+    /// top bar. Builds exactly what Ctrl+B builds.
+    void draw_top_bar_build(const ThemeInk& ink, float left, float height);
     void draw_close_project_modal();
 
     /// Advances a pending quit: asks about the next project that has unsaved
@@ -663,7 +692,9 @@ private:
     void sync_new_shader_path();
     // Where a file picker should start: next to the most recent project, else home.
     std::filesystem::path default_browse_dir() const;
-    void draw_status_bar();
+    /// The 26px bar along the bottom: compile state and project on the left,
+    /// cursor, pipeline and toolchain on the right.
+    void draw_status_bar(const ThemeInk& ink);
     void handle_shortcuts();
     void poll_external_changes(float delta_seconds);
     void autosave(float delta_seconds);
@@ -706,6 +737,13 @@ private:
     /// The active pack's file, so an edit to it can be noticed on focus. Not
     /// watching anything while a built-in theme is active: there is no file.
     ThemeWatch theme_watch_;
+
+    /// The interface and code fonts, swapped between frames.
+    FontLibrary fonts_;
+
+    /// See theme_previews(). Empty until first asked for, and emptied whenever
+    /// the set of packs is re-read.
+    std::vector<ResolvedTheme> theme_previews_;
 
     /// Open projects in tab order. Held by pointer so a session keeps its
     /// address when another one is opened or closed: the build thread and the

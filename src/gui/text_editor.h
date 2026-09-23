@@ -92,6 +92,10 @@ public:
     // Line the caret was on at the last edit, 1-based; 0 when unknown.
     int cursor_line() const { return cursor_line_; }
 
+    // Column of the caret on that line, 1-based, counted in characters rather
+    // than bytes so a line with an accented comment still reads right.
+    int cursor_column() const { return cursor_column_; }
+
     // Ask the next draw to scroll to a line (used when clicking a diagnostic).
     void request_scroll_to(int line) { scroll_to_line_ = line; }
 
@@ -213,11 +217,25 @@ private:
                         ImDrawList* draw_list, float line_height,
                         const EditorStyle& style) const;
 
+    /// Tints every visible line a diagnostic is about and marks its left edge
+    /// in the severity's colour. Drawn under the text.
+    void draw_line_marks(const OverlayGeometry& geometry, const Diagnostics& diagnostics,
+                         ImDrawList* draw_list, float line_height,
+                         const EditorStyle& style) const;
+
+    /// The worst diagnostic on each visible line, as a chip after the line's
+    /// last character: the message where the eye already is, without a trip to
+    /// the list below. Drawn over the text, and only where there is room.
+    void draw_line_lenses(const OverlayGeometry& geometry, const Diagnostics& diagnostics,
+                          ImDrawList* draw_list, float line_height,
+                          const EditorStyle& style) const;
+
     /// The half-open byte range a diagnostic marks on `line` (0-based).
     void diagnostic_span(int line, int column, std::uint32_t& out_begin,
                          std::uint32_t& out_end) const;
 
     int cursor_line_ = 1;
+    int cursor_column_ = 1;
     int scroll_to_line_ = 0;
     float last_scroll_y_ = 0.0f;
 

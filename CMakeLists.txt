@@ -142,7 +142,10 @@ if(SSSTUDIO_BUILD_GUI AND TARGET SDL3::SDL3)
     add_executable(sdl_shader_studio WIN32 MACOSX_BUNDLE
         src/gui/main.cpp
         src/gui/app.cpp
+        src/gui/chrome.cpp
         src/gui/theme.cpp
+        src/gui/fonts.cpp
+        src/gui/widgets.cpp
         src/gui/panels/editor_panel.cpp
         src/gui/panels/io_panel.cpp
         src/gui/panels/preview_panel.cpp
@@ -206,8 +209,22 @@ if(SSSTUDIO_BUILD_GUI AND TARGET SDL3::SDL3)
     # relinks, so editing or adding a theme would not have shipped it until
     # something else happened to change. CONFIGURE_DEPENDS re-globs when a file
     # appears, which is the other half of the same problem.
-    file(GLOB SSSTUDIO_THEME_FILES CONFIGURE_DEPENDS
+    #
+    # Recursive, because a pack can be a directory: an edit to the theme.toml
+    # inside one changes no file at the top level, and a flat glob would only
+    # have seen the directory itself.
+    file(GLOB_RECURSE SSSTUDIO_THEME_FILES CONFIGURE_DEPENDS
         "${CMAKE_CURRENT_SOURCE_DIR}/themes/*")
+    # The default theme's fonts travel inside its pack, and so with the copy
+    # below. Said at configure time when one is missing, because the app itself
+    # only falls back to the built-in font - a build shipped without them would
+    # look wrong without anything having failed.
+    foreach(font IN ITEMS IBMPlexSans-Regular.ttf JetBrainsMono-Regular.ttf)
+        if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/themes/tide-dark.s3theme/fonts/${font}")
+            message(WARNING "themes/tide-dark.s3theme/fonts/${font} is missing; the app will "
+                            "draw the Tide themes in its built-in font. See the README there.")
+        endif()
+    endforeach()
     add_custom_command(
         OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/ssstudio_themes.stamp"
         COMMAND "${CMAKE_COMMAND}" -E copy_directory

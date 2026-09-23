@@ -41,13 +41,19 @@ theme pack (level 3).
 
 ## Level 1: built-in themes and palettes
 
-The app has three built-in **interface themes**:
+The app ships with two **theme packs** of its own, and has three built-in
+**interface themes** besides:
 
 | Theme | Look |
 |---|---|
-| `dark` | The default |
+| `tide-dark` | The default: cool neutral panels on a darker gutter, a mint accent, IBM Plex Sans and JetBrains Mono |
+| `tide-light` | Tide on a pale ground |
+| `dark` | The original dark interface |
 | `light` | A pale interface |
 | `classic` | Dear ImGui's classic colours |
+
+The Tide themes are packs like any other (see level 3), so they can be copied
+and changed; the three built-ins cannot.
 
 and three built-in **syntax palettes** for the editor:
 
@@ -57,11 +63,11 @@ and three built-in **syntax palettes** for the editor:
 | `light` | The light and classic themes, where the editor background is pale |
 | `mono` | Structure only: comments fade back, everything else is one colour. For anyone who finds a full palette distracting |
 
-Pick both in **Settings > Editor**. They are stored in the settings file as:
+Pick both in **Settings > Theme**. They are stored in the settings file as:
 
 ```toml
 [editor]
-color_theme = "dark"
+color_theme = "tide-dark"
 syntax_theme = "default"   # used when the theme sets no syntax colours
 ```
 
@@ -87,7 +93,7 @@ The editor colours ten kinds of token:
 | `operator` | Operators and punctuation |
 | `identifier` | Every name your shader introduces |
 
-Change any of them in **Settings > Editor**. You can also edit the settings file
+Change any of them in **Settings > Theme**. You can also edit the settings file
 by hand (`ssstudio settings --path` tells you where it is):
 
 ```toml
@@ -155,7 +161,7 @@ and `ink.primary` contrasts more with it, so button text stays readable.
 ### Your first theme pack
 
 **1. Find your themes folder.** It is next to your settings file. Open it from
-**Settings > Editor > Open folder**, which also creates it if needed, or go
+**Settings > Theme > Open folder**, which also creates it if needed, or go
 there yourself:
 
 | Platform | Folder |
@@ -184,8 +190,8 @@ built-in dark theme: the roles you did not set keep dark's values (apart from
 then worked out from the resulting twenty roles. Run [`ssstudio theme ash.s3theme --resolve`](#checking-a-pack-from-the-command-line)
 to see which values you set and which were filled in for you.
 
-**3. Load it.** In **Settings > Editor**, click **Reload themes**, then choose
-*Ash* from the Theme list.
+**3. Load it.** In **Settings > Theme**, click **Reload themes**, then choose
+the *Ash* card.
 
 **The file name is the theme's id.** `ash.s3theme` is the theme `ash`, and that
 id is what your settings file records. Ids are matched without regard to case.
@@ -378,7 +384,7 @@ mistake should never cost you your session.
 
 ### A fast edit loop
 
-Turn on **Settings > Editor > Reload the theme when the window regains focus**.
+Turn on **Settings > Theme > Reload the theme when the window regains focus**.
 With your pack selected, save it in your text editor and switch back to the app:
 the change is applied.
 

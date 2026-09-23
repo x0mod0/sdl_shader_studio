@@ -19,6 +19,7 @@
 
 #include "panels/panel_common.h"
 #include "tab_scope.h"
+#include "widgets.h"
 #include "preview/renderer.h"
 #include "preview/texture_registry.h"
 #include "scene/scene.h"
@@ -221,6 +222,9 @@ bool App::init(SDL_Window* window, SDL_GPUDevice* device) {
 
     reload_theme_packs();
     apply_current_theme();
+    // Before the first NewFrame(), so the very first frame is drawn in the
+    // theme's fonts rather than flashing the built-in one.
+    before_frame();
 
     auto backend = create_default_backend(settings_.tools.shadercross_dir);
     backend_name_ = backend->name();
@@ -693,6 +697,7 @@ std::filesystem::path App::user_themes_dir() const {
 
 void App::reload_theme_packs() {
     theme_packs_.clear();
+    theme_previews_.clear();
     // theme_pack_paths() hands back bundled, then user, then project, so
     // assigning in order is what makes a later root win an id collision.
     for (const auto& path : theme_pack_paths(theme_roots())) {
@@ -773,6 +778,48 @@ void App::apply_current_theme() {
                                                      : watched->second.file);
 
     apply_theme(theme_, settings_.ui.ui_scale);
+    request_fonts();
+}
+
+void App::request_fonts() {
+    FontChoice choice;
+    choice.ui = theme_.font_ui;
+    // The user's own font outranks the theme's: a font is often an
+    // accessibility choice, and a theme change must not undo one.
+    choice.mono = settings_.editor.font_path.empty()
+                      ? theme_.font_editor
+                      : std::filesystem::path(settings_.editor.font_path);
+    fonts_.request(choice);
+}
+
+void App::before_frame() {
+    if (!fonts_.pending()) return;
+    for (const std::string& problem : fonts_.apply()) log(Severity::Info, problem);
+}
+
+const std::vector<ResolvedTheme>& App::theme_previews() {
+    if (!theme_previews_.empty()) return theme_previews_;
+
+    ThemeResolveContext context;
+    context.available = theme_packs_;
+    context.fallback_syntax_palette = settings_.editor.syntax_theme;
+    // Packs first, the way the design lists them: the themes someone installed
+    // are the ones they are most likely to be choosing between.
+    for (const auto& [id, pack] : theme_packs_) {
+        ResolvedTheme resolved;
+        Diagnostics ignored;  // reported when the pack is applied, not here
+        if (!resolve_theme(pack, context, resolved, ignored)) {
+            // Refused packs still get a card, showing the base they would fall
+            // back to, under their own name so they can still be found.
+            resolved.id = id;
+            resolved.name = pack.name.empty() ? id : pack.name;
+        }
+        theme_previews_.push_back(std::move(resolved));
+    }
+    for (const char* id : {"dark", "light", "classic"}) {
+        theme_previews_.push_back(builtin_resolved_theme(id, settings_.editor.syntax_theme));
+    }
+    return theme_previews_;
 }
 
 std::filesystem::path App::projects_dir() const {
@@ -2106,30 +2153,42 @@ void App::apply_panel_focus() {
 }
 
 void App::draw_dockspace() {
+    const ThemeInk ink(theme_);
+
+    // Both bars before the host. Each takes its height out of the viewport's
+    // work area, and the host below is sized from what is left - so the menus,
+    // the project pills and the status line can never be covered by a panel.
+    draw_top_bar(ink);
+    draw_status_bar(ink);
+
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->WorkPos);
     ImGui::SetNextWindowSize(viewport->WorkSize);
     ImGui::SetNextWindowViewport(viewport->ID);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    // The gutter: panels float a separator's width in from every edge, and the
+    // host's own background is what shows between them. Painted in the darker
+    // surface.base while the panels are surface.raised, which is what makes
+    // them read as cards rather than as regions of one surface.
+    const float gutter = ImGui::GetStyle().DockingSeparatorSize;
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(gutter, gutter));
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ink.base);
 
     ImGuiWindowFlags flags = ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoTitleBar |
                              ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize |
                              ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus |
-                             ImGuiWindowFlags_NoNavFocus | ImGuiWindowFlags_MenuBar;
+                             ImGuiWindowFlags_NoNavFocus;
 
     ImGui::Begin("##dockhost", nullptr, flags);
     ImGui::PopStyleVar(3);
 
-    draw_menu_bar();
-
-    // Between the menu bar and the panels, so it reads as "which project the
-    // window below belongs to" rather than as one more panel tab.
-    draw_project_tabs();
-
     const ImGuiID dock_id = ImGui::GetID("MainDockspace");
     ImGui::DockSpace(dock_id, ImVec2(0, 0), ImGuiDockNodeFlags_PassthruCentralNode);
+    // Only now: the splitters between docked panels are painted in whatever
+    // the window background is while DockSpace() runs, and they are the gutter
+    // too.
+    ImGui::PopStyleColor();
 
     if (layout_pending_ || !layout_initialized_) {
         layout_pending_ = false;
@@ -2226,55 +2285,6 @@ void App::draw_dockspace() {
     }
 
     ImGui::End();
-}
-
-void App::draw_project_tabs() {
-    if (sessions_.empty()) {
-        pending_activate_key_.clear();
-        return;
-    }
-
-    // A close from a tab is applied after the bar is drawn: erasing a session
-    // mid-iteration would pull the vector out from under the loop, and the tab
-    // bar still has an EndTabBar owed to it.
-    int close_request = -1;
-
-    // Deliberately not Reorderable: a drag would move the tab in ImGui's own
-    // list only, and the order the tabs are in would stop matching the order
-    // Ctrl+PageDown and the Window menu walk.
-    if (ImGui::BeginTabBar("##projects", ImGuiTabBarFlags_FittingPolicyScroll |
-                                             ImGuiTabBarFlags_TabListPopupButton)) {
-        for (std::size_t i = 0; i < sessions_.size(); ++i) {
-            ProjectSession& session = *sessions_[i];
-
-            // The name is the label; the key is the identity. A project whose
-            // name changes keeps its tab, and two projects that happen to share
-            // a name still get a tab each.
-            std::string label = session.project.name;
-            if (label.empty()) label = "Untitled";
-            if (session.has_unsaved_changes()) label += " *";
-            label += "###project_" + session.key;
-
-            ImGuiTabItemFlags flags = ImGuiTabItemFlags_None;
-            if (pending_activate_key_ == session.key) flags |= ImGuiTabItemFlags_SetSelected;
-
-            bool keep_open = true;
-            if (ImGui::BeginTabItem(label.c_str(), &keep_open, flags)) {
-                // Clicking a tab is how the UI changes project: everything the
-                // panels draw comes from the active session.
-                activate_session(static_cast<int>(i));
-                ImGui::EndTabItem();
-            }
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("%s", session.project.root.string().c_str());
-            }
-            if (!keep_open) close_request = static_cast<int>(i);
-        }
-        ImGui::EndTabBar();
-    }
-    pending_activate_key_.clear();
-
-    if (close_request >= 0) request_close_session(close_request);
 }
 
 void App::draw_close_project_modal() {
@@ -2791,8 +2801,7 @@ void App::draw_delete_shader_modal() {
 }
 
 void App::draw_menu_bar() {
-    if (!ImGui::BeginMenuBar()) return;
-
+    // Drawn into the top bar's menu bar, which draw_top_bar() has begun.
     if (ImGui::BeginMenu("File")) {
         if (ImGui::MenuItem("New project...", "Ctrl+N")) prompt_new_project();
         if (ImGui::MenuItem("Open project...", "Ctrl+O")) prompt_open_project();
@@ -2948,26 +2957,8 @@ void App::draw_menu_bar() {
         ImGui::EndMenu();
     }
 
-    // Right-aligned status: backend and build state. A build started from
-    // another tab says whose it is, so a busy Build button explains itself.
-    std::string status = backend_name_;
-    if (build_busy_) {
-        const std::string who = building_project_name();
-        status = who.empty() ? "building..." : "building " + who + "...";
-    }
-    // Right-aligned, but never dragged back on top of the menus: on a window too
-    // narrow to hold both, the status simply follows them and is clipped at the
-    // edge rather than drawn over "View".
-    const float width = ImGui::CalcTextSize(status.c_str()).x;
-    const float x = ImGui::GetWindowWidth() - width - 20.0f;
-    if (x > ImGui::GetCursorPosX()) {
-        ImGui::SameLine(x);
-    } else {
-        ImGui::SameLine();
-    }
-    ImGui::TextDisabled("%s", status.c_str());
-
-    ImGui::EndMenuBar();
+    // The backend and the build state that used to be right-aligned here are
+    // in the status bar now (draw_status_bar), which has room for them.
 }
 
 // ---------------------------------------------------------------------------
@@ -3623,6 +3614,8 @@ void App::draw_command_palette() {
 // Frame
 // ---------------------------------------------------------------------------
 void App::frame(float delta_seconds) {
+    // First, before any panel pushes a font of its own.
+    begin_type_frame();
     compiler_->poll();
     file_dialog_.poll();
 

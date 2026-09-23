@@ -1,5 +1,6 @@
 // Visual styling. Kept apart from panel code so a theme change never touches
 // behaviour.
+#include <algorithm>
 #include <array>
 #include <string>
 #include <unordered_map>
@@ -52,6 +53,11 @@ void apply_default_metrics(ImGuiStyle& style) {
     style.ItemSpacing = ImVec2(8, 6);
     style.WindowMenuButtonPosition = ImGuiDir_None;
     style.SeparatorTextBorderSize = 1.0f;
+    // Panels sit on a gutter the dock host paints in surface.base (see
+    // App::draw_dockspace). Four pixels is what makes it read as space between
+    // cards rather than as a line drawn between them; it is also a wider,
+    // easier target for dragging a split.
+    style.DockingSeparatorSize = 4.0f;
 }
 
 /// The dark theme's own colours, which are ImGui's dark style with the handful
@@ -78,7 +84,11 @@ void apply_builtin_dark(ImGuiStyle& style) {
 void apply_pack_colors(ImGuiStyle& style, const ResolvedTheme& theme) {
     ImGui::StyleColorsDark();
     for (const auto& [name, color] : theme.ui) {
-        const int index = imgui_color_index("ImGuiCol_" + name);
+        // By the bare name: GetStyleColorName() spells ImGuiCol_Text as "Text",
+        // which is also how a pack spells it. Looking the name up with the
+        // prefix put back matched nothing, and every pack's widget colours
+        // were silently dropped.
+        const int index = imgui_color_index(name);
         if (index >= 0) style.Colors[index] = theme_vec4(color);
     }
 }
@@ -166,6 +176,12 @@ void apply_theme(const ResolvedTheme& theme, float ui_scale) {
 
     apply_default_metrics(style);
     if (!theme.builtin) apply_pack_metrics(style, theme.style);
+
+    // A pack's suggested interface size. Only a suggestion, and only within
+    // the range the format allows: ui_scale below still multiplies it, so the
+    // person at the keyboard keeps the last word on how large things are.
+    // Left alone otherwise, which lets ImGui take it from the font itself.
+    if (theme.font_ui_size > 0.0f) style.FontSizeBase = std::clamp(theme.font_ui_size, 11.0f, 22.0f);
 
     // A dock node draws its own close button at the right of the tab bar, on top
     // of the close button each tab already has. Two buttons a few pixels apart

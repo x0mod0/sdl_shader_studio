@@ -754,7 +754,7 @@ A generator producing a pack for this format should, in order:
    thresholds are not stylistic preferences; below them, text stops being
    readable for some of the people using it.
 
-While iterating in the application, turn on **Settings → Editor → "Reload the
+While iterating in the application, turn on **Settings → Theme → "Reload the
 theme when the window regains focus"**. With the pack selected, an edit saved in
 a text editor is applied as soon as you switch back: the active pack's file is
 checked for a new modification time on focus, and nothing is checked at any

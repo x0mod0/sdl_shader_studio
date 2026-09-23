@@ -11,6 +11,9 @@
 #include <imgui.h>
 #include <imgui_internal.h>  // GetInputTextState, FindWindowByName
 
+#include "fonts.h"
+#include "widgets.h"
+
 namespace ssstudio::gui {
 namespace {
 
@@ -664,6 +667,106 @@ void TextEditor::draw_squiggles(const OverlayGeometry& geometry, const Diagnosti
     }
 }
 
+namespace {
+
+/// The most severe diagnostic on each line in [first, last], 0-based lines.
+/// One per line, because that is what one line has room to show.
+std::map<int, const Diagnostic*> worst_per_line(const Diagnostics& diagnostics, int first,
+                                                int last, int line_count) {
+    std::map<int, const Diagnostic*> worst;
+    for (const Diagnostic& d : diagnostics) {
+        const int line = d.line - 1;  // diagnostics are 1-based
+        if (line < first || line > last || line < 0 || line >= line_count) continue;
+        auto it = worst.find(line);
+        if (it == worst.end() || static_cast<int>(d.severity) > static_cast<int>(it->second->severity)) {
+            worst[line] = &d;
+        }
+    }
+    return worst;
+}
+
+}  // namespace
+
+void TextEditor::draw_line_marks(const OverlayGeometry& geometry, const Diagnostics& diagnostics,
+                                 ImDrawList* draw_list, float line_height,
+                                 const EditorStyle& style) const {
+    if (diagnostics.empty() || line_starts_.empty()) return;
+    const auto worst = worst_per_line(diagnostics, geometry.first_line, geometry.last_line,
+                                      static_cast<int>(line_starts_.size()));
+    const float bar = std::max(1.0f, design_px(2.0f));
+    for (const auto& [line, d] : worst) {
+        const ImU32 color = severity_color(d->severity, style);
+        const float top = geometry.origin.y + static_cast<float>(line) * line_height;
+        // Across the whole box rather than the text: the band is what finds the
+        // line when scanning a long file, and a band as long as the line would
+        // vanish on a short one.
+        draw_list->AddRectFilled(ImVec2(geometry.clip_min.x, top),
+                                 ImVec2(geometry.clip_max.x, top + line_height),
+                                 with_alpha(color, 0.08f));
+        draw_list->AddRectFilled(ImVec2(geometry.clip_min.x, top),
+                                 ImVec2(geometry.clip_min.x + bar, top + line_height), color);
+    }
+}
+
+void TextEditor::draw_line_lenses(const OverlayGeometry& geometry, const Diagnostics& diagnostics,
+                                  ImDrawList* draw_list, float line_height,
+                                  const EditorStyle& style) const {
+    if (diagnostics.empty() || line_starts_.empty()) return;
+    const auto worst = worst_per_line(diagnostics, geometry.first_line, geometry.last_line,
+                                      static_cast<int>(line_starts_.size()));
+
+    // Measured in the code font, since that is what the line is drawn in; the
+    // chip itself is prose, and is set in the interface font at its own size
+    // whatever the editor is zoomed to.
+    ImFont* code_font = ImGui::GetFont();
+    const float code_size = ImGui::GetFontSize();
+    ImFont* chip_font = ImGui::GetIO().FontDefault != nullptr ? ImGui::GetIO().FontDefault : code_font;
+    const float chip_size = type_pixels(12.0f);
+    const float pad = design_px(8.0f);
+    const char* base = tokenized_text_.data();
+
+    for (const auto& [line, d] : worst) {
+        const std::uint32_t begin = line_starts_[static_cast<std::size_t>(line)];
+        const std::uint32_t end = line_end(line);
+        const float text_end =
+            geometry.origin.x +
+            code_font->CalcTextSizeA(code_size, FLT_MAX, 0.0f, base + begin, base + end).x;
+        const float left = text_end + design_px(18.0f);
+        const float room = geometry.clip_max.x - left - pad * 2.0f - design_px(4.0f);
+        if (room < chip_size * 4.0f) continue;  // no room for anything readable
+
+        // The first line of the message only, with the code in front when the
+        // compiler gave one, cut to fit.
+        std::string label = d->code.empty() ? d->message : d->code + " " + d->message;
+        if (const std::size_t newline = label.find('\n'); newline != std::string::npos) {
+            label.resize(newline);
+        }
+        const float dots = chip_font->CalcTextSizeA(chip_size, FLT_MAX, 0.0f, "...").x;
+        float width = chip_font->CalcTextSizeA(chip_size, FLT_MAX, 0.0f, label.c_str()).x;
+        if (width > room) {
+            while (!label.empty() && width + dots > room) {
+                label.pop_back();
+                while (!label.empty() && (static_cast<unsigned char>(label.back()) & 0xC0) == 0x80) {
+                    label.pop_back();
+                }
+                width = chip_font->CalcTextSizeA(chip_size, FLT_MAX, 0.0f, label.c_str()).x;
+            }
+            label += "...";
+            width += dots;
+        }
+
+        const ImU32 color = severity_color(d->severity, style);
+        const float top = geometry.origin.y + static_cast<float>(line) * line_height;
+        const float inset = std::max(1.0f, (line_height - chip_size) * 0.5f - design_px(2.0f));
+        const ImVec2 min(left, top + inset);
+        const ImVec2 max(left + width + pad * 2.0f, top + line_height - inset);
+        draw_list->AddRectFilled(min, max, with_alpha(color, 0.14f), design_px(4.0f));
+        draw_list->AddText(chip_font, chip_size,
+                           ImVec2(min.x + pad, top + (line_height - chip_size) * 0.5f), color,
+                           label.c_str());
+    }
+}
+
 bool TextEditor::draw(const char* id, std::string& text, const Diagnostics& diagnostics,
                       const EditorStyle& style, const DocumentInputs& document) {
     // Worst diagnostic per line, so the gutter marker reflects severity.
@@ -677,11 +780,12 @@ bool TextEditor::draw(const char* id, std::string& text, const Diagnostics& diag
     }
 
     // The code area draws at the editor's own text size, which is what the zoom
-    // shortcuts change. Pushed before anything is measured, so the gutter, the
-    // input box and the token overlay all agree on how tall a line is. The
-    // diagnostics below are popped back to the UI size: they are prose, and
-    // zooming the code has no reason to reflow them.
-    ImGui::PushFont(nullptr, style.font_size);
+    // shortcuts change, and in the code font. Pushed before anything is
+    // measured, so the gutter, the input box and the token overlay all agree on
+    // how tall a line is and where each character sits. The diagnostics below
+    // are popped back to the UI font: they are prose, and zooming the code has
+    // no reason to reflow them.
+    ImGui::PushFont(mono_font(), style.font_size);
 
     const float line_height = ImGui::GetTextLineHeight();
     const int total_lines = count_lines(text);
@@ -812,13 +916,22 @@ bool TextEditor::draw(const char* id, std::string& text, const Diagnostics& diag
     std::size_t cursor_offset = completion_.cursor;
     if (ImGuiInputTextState* state = ImGui::GetInputTextState(ImGui::GetItemID())) {
         active = true;
-        // Cursor line, used by the status bar and by "go to error".
+        // Cursor line and column, used by the status bar and by "go to error".
+        // The column counts UTF-8 lead bytes, so it is a character count.
         int line = 1;
+        int column = 1;
         const int cursor = state->GetCursorPos();
         for (int i = 0; i < cursor && i < static_cast<int>(text.size()); ++i) {
-            if (text[static_cast<std::size_t>(i)] == '\n') ++line;
+            const auto byte = static_cast<unsigned char>(text[static_cast<std::size_t>(i)]);
+            if (byte == '\n') {
+                ++line;
+                column = 1;
+            } else if ((byte & 0xC0) != 0x80) {
+                ++column;
+            }
         }
         cursor_line_ = line;
+        cursor_column_ = column;
         cursor_offset = std::min(static_cast<std::size_t>(std::max(cursor, 0)), text.size());
     }
 
@@ -846,9 +959,15 @@ bool TextEditor::draw(const char* id, std::string& text, const Diagnostics& diag
                 if (overlay) {
                     ImDrawList* draw_list = box->DrawList;
                     draw_list->PushClipRect(geometry.clip_min, geometry.clip_max, true);
+                    // The band goes under the text and the chip over it, so
+                    // each is drawn on its own side of the tokens.
+                    if (style.error_lens) {
+                        draw_line_marks(geometry, diagnostics, draw_list, line_height, style);
+                    }
                     draw_syntax(geometry, style, draw_list, line_height);
                     if (style.error_lens) {
                         draw_squiggles(geometry, diagnostics, draw_list, line_height, style);
+                        draw_line_lenses(geometry, diagnostics, draw_list, line_height, style);
                     }
                     draw_list->PopClipRect();
                 }
@@ -895,7 +1014,14 @@ bool TextEditor::draw(const char* id, std::string& text, const Diagnostics& diag
             // A full-width row sized to the wrapped text, with the text drawn on
             // top of it: a Selectable's own label is clipped to one line, which
             // is how the interesting half of a compiler message used to vanish.
+            //
+            // A message that carries a source excerpt - the offending line and a
+            // caret under the column - is set in the code font, where the caret
+            // lands under the character it means. In the interface font it
+            // drifts off to one side.
             ImGui::PushID(i);
+            const bool excerpt = d.message.find('\n') != std::string::npos;
+            if (excerpt) ImGui::PushFont(mono_font(), type_size(12.0f));
             const float wrap_width = ImGui::GetContentRegionAvail().x;
             const ImVec2 text_size = ImGui::CalcTextSize(label.c_str(), nullptr, false, wrap_width);
             const ImVec2 row_start = ImGui::GetCursorScreenPos();
@@ -914,6 +1040,7 @@ bool TextEditor::draw(const char* id, std::string& text, const Diagnostics& diag
             ImGui::TextUnformatted(label.c_str());
             ImGui::PopTextWrapPos();
             ImGui::PopStyleColor();
+            if (excerpt) ImGui::PopFont();
             ImGui::PopID();
         }
         ImGui::EndChild();

@@ -75,7 +75,12 @@ struct EditorSettings {
     /// "dark", "light", "classic", or the id of an installed theme pack. An id
     /// that is not installed opens as dark, so a settings file that travelled
     /// from a machine with more themes on it still opens.
-    std::string color_theme = "dark";
+    ///
+    /// A fresh install starts on Tide Dark, the pack the application ships as
+    /// its own look. It is a pack rather than a built-in so that it stays one
+    /// more theme anybody can copy and change; a copy of the app that has lost
+    /// its themes directory falls back to dark by the rule above.
+    std::string color_theme = "tide-dark";
 
     /// Re-read the active theme pack when the window regains focus, if its file
     /// has changed. Off by default: it is a theme author's convenience, and
