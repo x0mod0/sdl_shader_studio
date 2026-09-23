@@ -56,9 +56,14 @@ struct Entry {
     std::string_view expression;
 };
 
-/// The twenty semantic roles and what they fall back to. `ink.inverted` has no
-/// expression because its default is a choice between two colours rather than a
-/// formula - see resolve_roles().
+/// The twenty semantic roles, in the order `ssstudio theme --resolve` lists them,
+/// each with the expression docs/THEME_PACK_FORMAT.md suggests writing for it.
+/// Only the names are read at runtime (theme_role_names()). A role a pack leaves
+/// out comes from its base theme - in the end the fixed values in
+/// builtin_theme_roles() - and is never evaluated from these expressions; they
+/// are kept so the suggestion the document prints has one spelling. `ink.inverted`
+/// has no expression because, when absent, it is a choice between two colours
+/// rather than a formula - see inverted_ink().
 constexpr std::array<Entry, 20> kRoleDefaults = {{
     {"surface.base", "#17171a"},
     {"surface.raised", "lighten($surface.base, 4%)"},
