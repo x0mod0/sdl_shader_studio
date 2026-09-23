@@ -56,21 +56,51 @@ inherit = "dark"
 accent         = "#8a8f98"
 ```
 
-Everything else is derived from those three. That is the point of the format:
-sixty-three widget colours have a documented derivation from twenty semantic
-roles, so a theme stays coherent as you change it. Set `accent` and every
+The sixty-three widget colours all follow from twenty semantic roles, so the
+three roles above repaint every widget that uses them. Set `accent` and every
 button, header, slider and selected tab follows.
+
+The other *roles* do not follow. The seventeen this pack leaves out keep the
+fixed values `dark` gives them, so Ash's hovered and pressed buttons, its check
+marks and its text selection are still dark's, chosen for dark's accent rather
+than this one. (`ink.inverted` is the one exception: left out, it is recomputed
+against your accent.) When you change a role, set the roles that belong with it
+too, derived from it rather than picked separately - which is what
+`midnight.s3theme` does:
+
+```toml
+accent          = "#8a8f98"
+"accent.hover"  = "lighten($accent, 6%)"
+"accent.active" = "darken($accent, 8%)"
+"accent.muted"  = "alpha($accent, 30%)"
+"accent.ink"    = "$ink.primary"
+"select.bg"     = "alpha($accent, 35%)"
+```
+
+`--resolve` (below) lists which roles you set and which came from somewhere
+else, which is the quickest way to spot one you forgot.
 
 ## The four layers
 
 Later layers override earlier ones, and each may reference anything above it.
 
 ```
-1  derivation    "a hovered button is the accent, lightened"    built in
+1  derivation    every widget colour from a role:               built in
+                 a hovered button is $accent.hover
 2  inherit       the base theme named in [pack]
 3  the pack      [palette] -> [roles] -> everything else
 4  your pins     colours you edited yourself, one at a time
 ```
+
+What layer 2 hands down depends on what you inherit from:
+
+- **A built-in** (`dark`, `light`, `classic`) hands down a fixed value for
+  every role except `ink.inverted`. Those values do not react to anything your
+  pack sets.
+- **Another pack** hands down its layers as written, and they are resolved
+  together with yours. If the parent says
+  `"accent.hover" = "lighten($accent, 8%)"` and your pack changes `accent`,
+  your hover follows your accent.
 
 Layer 4 is worth knowing about: if you nudge one syntax colour in Settings, that
 one colour is *pinned* and stops following themes - the other nine keep
@@ -118,9 +148,10 @@ ssstudio theme mine.s3theme --resolve --lint
 ```
 
 `--resolve` prints every final value and whether you **set** it or it was
-**derived**, which is the question you actually have while writing one. `--lint`
-checks that text can be read: ink against its surface, syntax colours against
-the editor's ground, the accent against the panels behind it.
+**derived** - handed down by the base theme or worked out from a role - which is
+the question you actually have while writing one. `--lint` checks that text can
+be read: ink against its surface, syntax colours against the editor's ground,
+the accent against the panels behind it.
 
 The thresholds are calibrated so all three built-in themes pass clean, so a
 finding means the theme is *less* readable than what shipped - not that it is

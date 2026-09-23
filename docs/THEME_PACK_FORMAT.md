@@ -82,9 +82,18 @@ above it.
 ```
 
 Nothing is required except `[pack]`. A pack with only `[roles]` is complete. A
-pack with only `[palette]` and `inherit` is complete. Anything a pack leaves out
-comes from its base theme, and anything the base theme leaves out comes from the
-derivation table below.
+pack with only `[palette]` and `inherit` is complete.
+
+What fills the gaps differs by layer:
+
+- **Roles** a pack leaves out come from its base theme. Every chain ends at a
+  built-in, and a built-in supplies a fixed value for every role except
+  `ink.inverted` - so a role nobody in the chain sets keeps the built-in's value
+  whatever the pack does to the roles around it. See [`[roles]`](#roles).
+- **Widget colours** (`[colors]`) and the `[diagnostics]`, `[graph]` and
+  `[preview]` tables are worked out from the *final* roles through the
+  derivation tables below, unless some pack in the chain names them. A role
+  change therefore repaints every widget that uses that role.
 
 ### Why not one flat list of sixty-three colours
 
@@ -221,28 +230,42 @@ accent           = "$palette.ice"
 "status.info"    = "$palette.ice"
 ```
 
-| Role | Paints | Default when absent |
+A role this pack does not set is **not** worked out from the roles it does
+set. It comes from the base theme: a parent pack's own expression for it, if
+some pack in the chain has one, and otherwise the fixed value the built-in at
+the end of the chain supplies (`builtin_theme_roles()` in `theme_pack.cpp`). A
+pack that inherits `dark` and sets only `accent` therefore keeps dark's
+`accent.hover`, `accent.active`, `accent.muted`, `accent.ink` and `select.bg`,
+which were chosen for dark's accent rather than the new one. `ssstudio theme
+<pack> --resolve` shows this: those roles are listed as `derived` (not set by
+this pack) with dark's values.
+
+So the last column below is a suggestion, not a fallback: an expression to write
+when you set the role yourself, so it moves with the roles it belongs with. The
+only role computed when absent is `ink.inverted`.
+
+| Role | Paints | Suggested expression |
 |---|---|---|
-| `surface.base` | Window backgrounds, the docking ground | base theme's `WindowBg` |
-| `surface.raised` | Panels, popups, tooltips, menu bar, table headers | `lighten(surface.base, 4%)` |
-| `surface.sunken` | Input fields, the editor's text ground, scrollbar troughs | `darken(surface.base, 3%)` |
-| `surface.overlay` | Modal dim, drag-and-drop dim | `alpha(surface.base, 60%)` |
-| `ink.primary` | Body text | base theme's `Text` |
-| `ink.muted` | Disabled text, line numbers, hints, plot axes | `mix(ink.primary, surface.base, 55%)` |
-| `ink.inverted` | Text drawn on an accent fill | whichever of `surface.base` / `ink.primary` contrasts more with `accent`. Recomputed rather than inherited whenever a pack does not name it, because the right answer depends on the accent and an inherited one was chosen for a different accent |
-| `line.subtle` | Borders, separators, light table borders, tree lines | `mix(surface.base, ink.primary, 14%)` |
-| `line.strong` | Strong table borders, focus outlines, resize grips | `mix(surface.base, ink.primary, 28%)` |
-| `accent` | Buttons, headers, sliders, check marks, the selected tab | base theme's `Button` |
-| `accent.hover` | Hovered variants of all of the above | `lighten(accent, 8%)` |
-| `accent.active` | Held/pressed variants | `darken(accent, 6%)` |
-| `accent.muted` | Docking preview, unsaved marker, nav highlight, alt table rows | `alpha(accent, 25%)` |
-| `accent.ink` | Check marks, links, the tab overline | `ink.primary` |
-| `select.bg` | Text selection | `alpha(accent, 35%)` |
-| `select.ink` | Text inside a selection (unused by ImGui; the editor honours it) | `ink.primary` |
+| `surface.base` | Window backgrounds, the docking ground | your ground colour, usually a palette entry |
+| `surface.raised` | Panels, popups, tooltips, menu bar, table headers | `lighten($surface.base, 4%)` |
+| `surface.sunken` | Input fields, the editor's text ground, scrollbar troughs | `darken($surface.base, 3%)` |
+| `surface.overlay` | Modal dim, drag-and-drop dim | `alpha($surface.base, 60%)` |
+| `ink.primary` | Body text | your text colour, usually a palette entry |
+| `ink.muted` | Disabled text, line numbers, hints, plot axes | `mix($ink.primary, $surface.base, 55%)` |
+| `ink.inverted` | Text drawn on an accent fill | usually left out: when absent it is computed as whichever of `surface.base` / `ink.primary` contrasts more with `accent`. Recomputed rather than inherited, because the right answer depends on the accent and an inherited one was chosen for a different accent |
+| `line.subtle` | Borders, separators, light table borders, tree lines | `mix($surface.base, $ink.primary, 14%)` |
+| `line.strong` | Strong table borders, focus outlines, resize grips | `mix($surface.base, $ink.primary, 28%)` |
+| `accent` | Buttons, headers, sliders, check marks, the selected tab | your accent colour, usually a palette entry |
+| `accent.hover` | Hovered variants of all of the above | `lighten($accent, 8%)` |
+| `accent.active` | Held/pressed variants | `darken($accent, 6%)` |
+| `accent.muted` | Docking preview, unsaved marker, nav highlight, alt table rows | `alpha($accent, 25%)` |
+| `accent.ink` | Check marks, links, the tab overline | `$ink.primary` |
+| `select.bg` | Text selection | `alpha($accent, 35%)` |
+| `select.ink` | Text inside a selection (unused by ImGui; the editor honours it) | `$ink.primary` |
 | `status.ok` | "Compiled", "up to date", success counts | `#6fbf73` |
 | `status.warn` | Warnings, "modified", stale markers | `#e0af68` |
 | `status.error` | Errors, the destructive button, failed builds | `#eb6a6a` |
-| `status.info` | Notes, info diagnostics, plot lines | `accent` |
+| `status.info` | Notes, info diagnostics, plot lines | `$accent` |
 
 The `ink.inverted` default is deliberately conditional rather than fixed: a
 theme whose accent is pale yellow needs dark text on its buttons, and one whose
@@ -532,8 +555,14 @@ is opened, not after.
 
 Sources of a final colour, from weakest to strongest:
 
-1. The derivation table in this document.
-2. The base theme named by `inherit`, resolved recursively.
+1. The derivation tables in this document: every widget colour and every
+   `[diagnostics]`, `[graph]` and `[preview]` entry, evaluated against the
+   final roles. Roles themselves have no derivation (see [`[roles]`](#roles)).
+2. The base theme named by `inherit`, resolved recursively. A parent *pack*
+   contributes its layers as written; they are merged with this pack's and
+   resolved once, so a parent's `"accent.hover" = "lighten($accent, 8%)"`
+   follows a child's `accent`. A *built-in* contributes fixed role values,
+   which follow nothing.
 3. This pack's `[palette]`, `[roles]`, then its explicit sections.
 4. The user's own pinned keys in `settings.toml`, one key at a time.
 
@@ -674,6 +703,19 @@ inherit = "dark"
 accent = "#8a8f98"
 ```
 
+Complete, but not yet coherent: the seventeen roles it leaves out keep dark's
+fixed values, so its hover, pressed, check-mark and selection colours were
+chosen for dark's accent. Deriving them from the roles they belong with fixes
+that:
+
+```toml
+"accent.hover"  = "lighten($accent, 6%)"
+"accent.active" = "darken($accent, 8%)"
+"accent.muted"  = "alpha($accent, 30%)"
+"accent.ink"    = "$ink.primary"
+"select.bg"     = "alpha($accent, 35%)"
+```
+
 ## Versioning
 
 `format` is the only compatibility gate. Within `format = 1`, keys may be added
@@ -695,9 +737,12 @@ A generator producing a pack for this format should, in order:
 1. Choose 6–10 palette colours and name them for what they *are*, not what they
    do. `void`, `ice`, `rose` survive being reassigned; `button_color` does not.
 2. Fill in all twenty roles from that palette, using transforms rather than new
-   literals wherever one colour is a variation of another. A theme whose hover
-   states are `lighten($accent, 8%)` stays coherent when the accent changes; one
-   with twelve hand-picked blues does not.
+   literals wherever one colour is a variation of another. Set every role but
+   `ink.inverted` (which is computed when left out), because any other role left
+   out keeps the built-in base's fixed value rather than following the roles you
+   did set. A theme whose hover states are `lighten($accent, 8%)`
+   stays coherent when the accent changes; one with twelve hand-picked blues
+   does not.
 3. Set `[syntax]` from the same palette. Ten colours that share the palette are
    what makes the editor look like part of the application rather than a window
    into another one.

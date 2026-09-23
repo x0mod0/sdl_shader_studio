@@ -455,11 +455,7 @@ pipeline:
 |---|---|
 | `0` | Success |
 | `1` | The command ran and failed: a compile error, an unreadable file, a refused theme pack, or an unknown profile in `build` / `pack` |
-| `2` | The command was used wrongly: an unknown command, a missing argument, or an unknown profile in `check` / `keys` |
-
-> **Watch out:** a misspelled option (`--profle release`) currently prints the
-> usage text and exits with `0`, so the step looks like it passed. If a CI step
-> finishes suspiciously fast, check its log for `unknown option`.
+| `2` | The command was used wrongly: an unknown command, an unknown option, a missing argument, or an unknown profile in `check` / `keys` |
 
 A typical CI job:
 

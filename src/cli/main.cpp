@@ -101,9 +101,28 @@ struct Args {
     bool resolve = false;
 };
 
-bool parse_args(int argc, char** argv, Args& args) {
-    if (argc < 2) return false;
+/// What parse_args() made of the command line. Asking for help and getting the
+/// arguments wrong both end in the usage text, but only one of them is a
+/// failure: a CI step with a misspelled option has to stop, not report success.
+enum class ParseResult {
+    /// The arguments are usable; run the command.
+    Ok,
+    /// `-h` or `--help` was asked for. Print the usage and exit 0.
+    Help,
+    /// No command, or an option nobody knows. Print the usage and exit 2, the
+    /// same status an unknown command gets.
+    Invalid,
+};
+
+/// Both spellings of the help flag, accepted in place of a command or after one.
+bool is_help_flag(const std::string& a) { return a == "-h" || a == "--help"; }
+
+ParseResult parse_args(int argc, char** argv, Args& args) {
+    if (argc < 2) return ParseResult::Invalid;
     args.command = argv[1];
+    // `ssstudio --help` names no command; without this it would be read as one
+    // and rejected as unknown.
+    if (is_help_flag(args.command)) return ParseResult::Help;
     int i = 2;
     if (i < argc && argv[i][0] != '-') args.target = argv[i++];
     // `import` takes a second positional: the file to read, or "-" for stdin.
@@ -130,13 +149,13 @@ bool parse_args(int argc, char** argv, Args& args) {
         else if (a == "--author") args.author = next();
         else if (a == "--licence" || a == "--license") args.licence = next();
         else if (a == "--keep-alpha") args.keep_alpha = true;
-        else if (a == "-h" || a == "--help") return false;
+        else if (is_help_flag(a)) return ParseResult::Help;
         else {
             std::cerr << "unknown option: " << a << "\n";
-            return false;
+            return ParseResult::Invalid;
         }
     }
-    return true;
+    return ParseResult::Ok;
 }
 
 int cmd_new(const Args& args) {
@@ -643,9 +662,15 @@ int cmd_settings(const Args& args) {
 
 int main(int argc, char** argv) {
     Args args;
-    if (!parse_args(argc, argv, args)) {
-        usage();
-        return argc < 2 ? 2 : 0;
+    switch (parse_args(argc, argv, args)) {
+        case ParseResult::Ok:
+            break;
+        case ParseResult::Help:
+            usage();
+            return 0;
+        case ParseResult::Invalid:
+            usage();
+            return 2;
     }
 
     if (args.command == "new") return cmd_new(args);

@@ -144,6 +144,8 @@ accent          = "#7aa2f7"
 "accent.hover"  = "lighten($accent, 6%)"
 "accent.active" = "darken($accent, 8%)"
 "accent.muted"  = "alpha($accent, 30%)"
+"accent.ink"    = "$ink.primary"
+"select.bg"     = "alpha($accent, 35%)"
 ```
 
 The one exception is `ink.inverted` (text drawn on an accent fill). If you do
@@ -286,10 +288,20 @@ layer overrides an earlier one:
 ```
 1  derivation   every widget colour from its role:            built in
                 Button = $accent, ButtonHovered = $accent.hover
-2  inherit      the base theme's twenty roles, named in [pack]
+2  inherit      the base theme named in [pack]
 3  the pack     [palette] -> [roles] -> everything else
 4  your pins    colours you edited yourself in Settings
 ```
+
+What layer 2 hands down depends on what you inherit from:
+
+- **A built-in theme** (`dark`, `light`, `classic`) gives a fixed value for
+  every role except `ink.inverted`. Those values do not change when your pack
+  changes other roles.
+- **Another pack** gives its role expressions as written, and they are worked
+  out together with yours. If the parent pack says
+  `"accent.hover" = "lighten($accent, 8%)"` and your pack changes `accent`,
+  your hover colour follows your accent.
 
 Roles are merged first (the parent's, then yours), and widget colours are worked
 out once from the final set of roles. That is why changing a role in your pack
