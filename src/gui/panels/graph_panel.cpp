@@ -15,16 +15,22 @@
 #include <imgui.h>
 
 #include "app.h"
+#include "fonts.h"
 #include "panel_common.h"
 #include "ssstudio/graph.h"
+#include "widgets.h"
 
 namespace ssstudio::gui {
 namespace {
 
 constexpr float kNodeWidth = 168.0f;
-constexpr float kRowHeight = 20.0f;
-constexpr float kHeaderHeight = 26.0f;
+constexpr float kRowHeight = 22.0f;
+constexpr float kHeaderHeight = 30.0f;
 constexpr float kPinRadius = 5.0f;
+/// A node's corner radius, and the height of the category stripe along the top
+/// of its header.
+constexpr float kNodeRounding = 8.0f;
+constexpr float kStripeHeight = 3.0f;
 
 struct PinLocation {
     ImVec2 position;
@@ -121,9 +127,10 @@ std::string unique_id(const Graph& graph, const std::string& base) {
 /// appears where the next click on the canvas lands, because a node dropped at a
 /// position nobody chose is a node that has to be dragged somewhere immediately.
 void draw_library(App& app, Graph& graph, std::string& armed, bool& changed) {
+    const ThemeInk ink(app.theme());
     static char filter[64] = "";
     ImGui::SetNextItemWidth(-FLT_MIN);
-    ImGui::InputTextWithHint("##nodefilter", "filter nodes", filter, sizeof(filter));
+    ImGui::InputTextWithHint("##nodefilter", "Filter nodes", filter, sizeof(filter));
     const std::string needle = filter;
 
     // What is armed, and the way out of it. Escape does the same thing, but a
@@ -163,6 +170,17 @@ void draw_library(App& app, Graph& graph, std::string& armed, bool& changed) {
                          return a->label < b->label;
                      });
 
+    // How many of each category the filter lets through, for the count at the
+    // end of each heading - which is what says a folded category is not empty.
+    std::map<NodeCategory, int> counts;
+    for (const NodeDef* def : definitions) {
+        if (!needle.empty() && def->label.find(needle) == std::string::npos &&
+            def->type.find(needle) == std::string::npos) {
+            continue;
+        }
+        ++counts[def->category];
+    }
+
     for (const NodeDef* def : definitions) {
         if (!needle.empty() && def->label.find(needle) == std::string::npos &&
             def->type.find(needle) == std::string::npos) {
@@ -175,8 +193,32 @@ void draw_library(App& app, Graph& graph, std::string& armed, bool& changed) {
             // Capitalized for display only: to_string(NodeCategory) is the
             // spelling a graph file carries, and changing that would rewrite
             // every saved graph to make a heading look right.
-            section_open = ImGui::TreeNodeEx(display_case(to_string(current)).c_str(),
-                                             ImGuiTreeNodeFlags_DefaultOpen);
+            //
+            // The tree node carries only the arrow; the category's colour, its
+            // name and its count are laid out after it on the same line, so the
+            // swatch sits between the arrow and the word the way the canvas
+            // shows the same colour on the node's header.
+            const std::string name = display_case(to_string(current));
+            section_open = ImGui::TreeNodeEx(("##category_" + name).c_str(),
+                                             ImGuiTreeNodeFlags_DefaultOpen |
+                                                 ImGuiTreeNodeFlags_SpanAvailWidth |
+                                                 ImGuiTreeNodeFlags_AllowOverlap);
+            ImGui::SameLine(0.0f, 0.0f);
+            {
+                const float swatch = design_px(8.0f);
+                const ImVec2 at = ImGui::GetCursorScreenPos();
+                const float y = at.y + (ImGui::GetTextLineHeight() - swatch) * 0.5f;
+                ImGui::GetWindowDrawList()->AddRectFilled(
+                    ImVec2(at.x, y), ImVec2(at.x + swatch, y + swatch),
+                    header_color(current, app.theme()), design_px(2.0f));
+                ImGui::Dummy(ImVec2(swatch, ImGui::GetTextLineHeight()));
+            }
+            ImGui::SameLine(0.0f, design_px(8.0f));
+            ImGui::TextUnformatted(name.c_str());
+            const std::string count = std::to_string(counts[current]);
+            FontScope small(nullptr, 11.0f);
+            same_line_right_aligned(text_width(count.c_str()) + design_px(4.0f));
+            colored_text(count, ink.muted);
         }
         if (!section_open) continue;
 
@@ -199,7 +241,9 @@ void draw_library(App& app, Graph& graph, std::string& armed, bool& changed) {
     (void)changed;
 }
 
-void draw_inspector(Graph& graph, const std::string& selected, bool& changed) {
+void draw_inspector(Graph& graph, const std::string& selected, bool& changed,
+                    const ResolvedTheme& theme) {
+    const ThemeInk ink(theme);
     Node* node = graph.find_node(selected);
     if (!node) {
         ImGui::TextDisabled("Select a node to edit it.");
@@ -208,7 +252,20 @@ void draw_inspector(Graph& graph, const std::string& selected, bool& changed) {
     const NodeDef* def = resolve_node_def(graph, node->type);
     if (!def) return;
 
-    ImGui::TextDisabled("%s", def->type.c_str());
+    // What kind of node this is: its category's colour and its type, as the
+    // library and the node's own header show them.
+    {
+        const float swatch = design_px(8.0f);
+        const ImVec2 at = ImGui::GetCursorScreenPos();
+        const float y = at.y + (ImGui::GetTextLineHeight() - swatch) * 0.5f;
+        ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(at.x, y),
+                                                  ImVec2(at.x + swatch, y + swatch),
+                                                  header_color(def->category, theme),
+                                                  design_px(2.0f));
+        ImGui::Dummy(ImVec2(swatch, ImGui::GetTextLineHeight()));
+        ImGui::SameLine(0.0f, design_px(8.0f));
+        mono_text(def->type, ink.muted, 12.0f);
+    }
 
     char name[96];
     std::snprintf(name, sizeof(name), "%s", node->name.c_str());
@@ -325,7 +382,9 @@ void draw_inspector(Graph& graph, const std::string& selected, bool& changed) {
                                                 std::clamp<std::size_t>(stored.size(), 1, 4)))))
                                     .c_str());
         } else {
-            ImGui::TextColored(ImVec4(0.92f, 0.42f, 0.42f, 1.0f), "%s", problem.c_str());
+            ImGui::PushStyleColor(ImGuiCol_Text, ink.error);
+            ImGui::TextUnformatted(problem.c_str());
+            ImGui::PopStyleColor();
         }
     }
     if (node->type == "utility.component") {
@@ -396,12 +455,14 @@ void draw_inspector(Graph& graph, const std::string& selected, bool& changed) {
         }
     }
 
-    ImGui::Separator();
-    if (ImGui::Button("Delete node")) {
+    ImGui::Spacing();
+    if (danger_button("Delete node", ink)) {
         remove_node(graph, node->id);
         changed = true;
     }
     ImGui::SameLine();
+    ImGui::AlignTextToFramePadding();
+    FontScope small(nullptr, 12.0f);
     ImGui::TextDisabled("or press Delete");
 }
 
@@ -474,9 +535,10 @@ void draw_graph_panel(App& app) {
     }
 
     bool changed = false;
+    const ThemeInk ink(theme);
 
     // --- toolbar -----------------------------------------------------------
-    const float types_width = fitted_width(120.0f, 70.0f);
+    const float types_width = fitted_width(130.0f, 70.0f);
 
     // The explanatory half of this row is a whole sentence, so on a narrow panel
     // it is what folds first and the controls follow it onto the next line.
@@ -484,10 +546,10 @@ void draw_graph_panel(App& app) {
     if (graph->detached) {
         const char* note =
             "Detached: the text file is authoritative and this graph is a snapshot.";
-        row.next(text_width(note));
-        ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f), "%s", note);
+        row.next(text_width(note) + design_px(18.0f));
+        pill_label(note, ink.warn, with_alpha(ink.warn, 0.12f));
         row.next(button_width("Reattach"));
-        if (ImGui::SmallButton("Reattach")) {
+        if (ImGui::Button("Reattach")) {
             graph->detached = false;
             changed = true;
         }
@@ -497,30 +559,46 @@ void draw_graph_panel(App& app) {
             // The generated source stays on disk and stops being regenerated.
             app.detach_graph(doc->id);
         }
-        const char* note = "the shader file is generated from this graph";
-        row.next(text_width(note));
-        ImGui::TextDisabled("%s", note);
+        const char* note = "Shader file is generated from this graph";
+        row.next(text_width(note) + design_px(18.0f));
+        pill_label(note, ink.accent_ink, with_alpha(ink.accent_ink, 0.12f));
+    }
+
+    // The settings of the graph itself, against the right edge as one group
+    // when the row has room for them.
+    static bool snap_to_grid = true;
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float settings_width = labeled_width("Types", types_width) + style.ItemSpacing.x +
+                                 design_px(9.0f) + style.ItemSpacing.x +
+                                 checkbox_width("Formatted") + style.ItemSpacing.x +
+                                 checkbox_width("Snap") + style.ItemSpacing.x +
+                                 button_width("Recenter");
+    row.next(settings_width);
+    if (ImGui::GetCursorPosX() + settings_width < ImGui::GetContentRegionMax().x) {
+        ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - settings_width);
     }
 
     int coercion = static_cast<int>(graph->coercion);
     const char* coercion_labels[] = {"strict", "widening", "loose"};
-    row.next(labeled_width("types", types_width));
-    if (ImGui::Combo(left_label("Types", types_width).c_str(), &coercion, coercion_labels, IM_ARRAYSIZE(coercion_labels))) {
+    ImGui::PushStyleColor(ImGuiCol_Text, ink.muted);
+    const std::string types_id = left_label("Types", types_width);
+    ImGui::PopStyleColor();
+    if (ImGui::Combo(types_id.c_str(), &coercion, coercion_labels, IM_ARRAYSIZE(coercion_labels))) {
         graph->coercion = static_cast<Coercion>(coercion);
         changed = true;
     }
-    row.next(checkbox_width("formatted"));
+    ImGui::SameLine();
+    toolbar_divider(ink);
+    ImGui::SameLine();
     if (ImGui::Checkbox("Formatted", &graph->formatted_output)) changed = true;
-
-    static bool snap_to_grid = true;
-    row.next(checkbox_width("snap"));
+    ImGui::SameLine();
     ImGui::Checkbox("Snap", &snap_to_grid);
 
     // The way back when a pan has gone far enough that the nodes are off-screen,
     // which is the one state panning can leave you in with no visible way out.
     const std::string pan_key = app.active_session_key() + '\x1f' + doc->id;
     ImVec2& pan = canvas_pan(pan_key);
-    row.next(button_width("Recenter"));
+    ImGui::SameLine();
     if (ImGui::Button("Recenter")) pan = ImVec2(0.0f, 0.0f);
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip(
@@ -682,22 +760,30 @@ void draw_graph_panel(App& app) {
     // rather than a term threaded through every position.
     const ImVec2 origin(canvas_top_left.x + pan.x, canvas_top_left.y + pan.y);
 
+    // The canvas's own ground, a shade off the panel's, so the working area
+    // reads as a surface to put things on.
+    draw_list->AddRectFilled(canvas_top_left,
+                             ImVec2(canvas_top_left.x + canvas_size.x,
+                                    canvas_top_left.y + canvas_size.y),
+                             theme_u32(theme.graph_color("canvas")));
+
     // Grid, aligned to the panned origin so it slides with the nodes rather than
     // staying nailed to the panel and making the pan look like nothing moved.
+    // Dots at the crossings rather than lines: enough to align by, without
+    // ruling the canvas into a table the wires have to fight.
     constexpr float kGrid = 24.0f;
     const float grid_x = std::fmod(pan.x, kGrid) - (pan.x < 0.0f ? kGrid : 0.0f);
     const float grid_y = std::fmod(pan.y, kGrid) - (pan.y < 0.0f ? kGrid : 0.0f);
-    for (float x = grid_x; x < canvas_size.x; x += kGrid) {
-        if (x < 0.0f) continue;
-        draw_list->AddLine(ImVec2(canvas_top_left.x + x, canvas_top_left.y),
-                           ImVec2(canvas_top_left.x + x, canvas_top_left.y + canvas_size.y),
-                           theme_u32(theme.graph_color("grid")));
-    }
+    const ImU32 grid_color = theme_u32(theme.graph_color("grid"));
+    const float dot = std::max(1.0f, design_px(1.0f));
     for (float y = grid_y; y < canvas_size.y; y += kGrid) {
         if (y < 0.0f) continue;
-        draw_list->AddLine(ImVec2(canvas_top_left.x, canvas_top_left.y + y),
-                           ImVec2(canvas_top_left.x + canvas_size.x, canvas_top_left.y + y),
-                           theme_u32(theme.graph_color("grid")));
+        for (float x = grid_x; x < canvas_size.x; x += kGrid) {
+            if (x < 0.0f) continue;
+            const ImVec2 at(canvas_top_left.x + x, canvas_top_left.y + y);
+            draw_list->AddRectFilled(ImVec2(at.x - dot * 0.5f, at.y - dot * 0.5f),
+                                     ImVec2(at.x + dot * 0.5f, at.y + dot * 0.5f), grid_color);
+        }
     }
 
     std::map<std::string, PinLocation> output_pins;
@@ -712,18 +798,47 @@ void draw_graph_panel(App& app) {
         const float height = node_height(*def);
         const ImVec2 bottom_right(position.x + kNodeWidth, position.y + height);
 
+        // A card: a soft shadow under it, its category as a stripe along the
+        // top and a faint wash of the same colour over the header, and the
+        // selection as the accent outline with a wider, fainter ring around it.
+        const bool is_selected = selected_node == node.id;
+        const ImU32 category = header_color(def->category, theme);
+        draw_list->AddRectFilled(ImVec2(position.x - 2.0f, position.y + 4.0f),
+                                 ImVec2(bottom_right.x + 2.0f, bottom_right.y + 8.0f),
+                                 IM_COL32(0, 0, 0, 40), kNodeRounding + 2.0f);
+        if (is_selected) {
+            draw_list->AddRect(ImVec2(position.x - 2.5f, position.y - 2.5f),
+                               ImVec2(bottom_right.x + 2.5f, bottom_right.y + 2.5f),
+                               ink.accent_muted, kNodeRounding + 2.5f, 0, 3.0f);
+        }
         draw_list->AddRectFilled(position, bottom_right, theme_u32(theme.graph_color("node_bg")),
-                                 5.0f);
+                                 kNodeRounding);
         draw_list->AddRectFilled(position, ImVec2(bottom_right.x, position.y + kHeaderHeight),
-                                 header_color(def->category, theme), 5.0f, ImDrawFlags_RoundCornersTop);
+                                 with_alpha(category, 0.12f), kNodeRounding,
+                                 ImDrawFlags_RoundCornersTop);
+        draw_list->PushClipRect(position, ImVec2(bottom_right.x, position.y + kStripeHeight), true);
+        draw_list->AddRectFilled(position, ImVec2(bottom_right.x, position.y + kNodeRounding),
+                                 category, kNodeRounding, ImDrawFlags_RoundCornersTop);
+        draw_list->PopClipRect();
         draw_list->AddRect(position, bottom_right,
-                           selected_node == node.id
-                               ? theme_u32(theme.graph_color("node_border_selected"))
-                               : theme_u32(theme.graph_color("node_border")),
-                           5.0f, 0, selected_node == node.id ? 2.0f : 1.0f);
-        draw_list->AddText(ImVec2(position.x + 8.0f, position.y + 5.0f),
+                           is_selected ? theme_u32(theme.graph_color("node_border_selected"))
+                                       : theme_u32(theme.graph_color("node_border")),
+                           kNodeRounding, 0, 1.0f);
+        const float title_y = position.y + kStripeHeight +
+                              (kHeaderHeight - kStripeHeight - ImGui::GetTextLineHeight()) * 0.5f;
+        draw_list->AddText(ImVec2(position.x + 10.0f, title_y),
                            theme_u32(theme.graph_color("node_title")),
                            (node.name.empty() ? node.id : node.name).c_str());
+        {
+            // The category's word, quietly, at the header's other end.
+            FontScope small(nullptr, 10.5f);
+            const std::string word(to_string(def->category));
+            draw_list->AddText(ImVec2(bottom_right.x - 10.0f - text_width(word.c_str()),
+                                      position.y + kStripeHeight +
+                                          (kHeaderHeight - kStripeHeight -
+                                           ImGui::GetTextLineHeight()) * 0.5f),
+                               ink.muted, word.c_str());
+        }
 
         // Header is the drag handle.
         ImGui::SetCursorScreenPos(position);
@@ -762,12 +877,37 @@ void draw_graph_panel(App& app) {
             const ImVec2 pin(position.x,
                              position.y + kHeaderHeight + kRowHeight * (static_cast<float>(i) + 0.5f));
             const bool connected = graph->incoming(node.id, def->inputs[i].name) != nullptr;
-            draw_list->AddCircleFilled(pin, kPinRadius,
-                                       connected ? color_for(def->inputs[i].type, theme)
-                                                 : theme_u32(theme.graph_color("pin_unconnected")));
-            draw_list->AddText(ImVec2(pin.x + 10.0f, pin.y - 7.0f),
-                               theme_u32(theme.graph_color("node_label")),
-                               def->inputs[i].name.c_str());
+            // An input with nothing wired in is a ring rather than a dot: it
+            // reads as an open socket, and the value it will use instead is
+            // shown at the far end of its row.
+            if (connected) {
+                draw_list->AddCircleFilled(pin, kPinRadius, color_for(def->inputs[i].type, theme));
+            } else {
+                draw_list->AddCircleFilled(pin, kPinRadius, theme_u32(theme.graph_color("node_bg")));
+                draw_list->AddCircle(pin, kPinRadius - 1.0f,
+                                     theme_u32(theme.graph_color("pin_unconnected")), 0, 2.0f);
+            }
+            {
+                MonoScope mono(12.0f);
+                const float text_y = pin.y - ImGui::GetTextLineHeight() * 0.5f;
+                draw_list->AddText(ImVec2(pin.x + 12.0f, text_y),
+                                   theme_u32(theme.graph_color("node_label")),
+                                   def->inputs[i].name.c_str());
+                if (!connected && i >= def->outputs.size()) {
+                    const auto stored = node.values.find(def->inputs[i].name);
+                    const std::vector<double>& value =
+                        stored != node.values.end() && !stored->second.empty()
+                            ? stored->second
+                            : def->inputs[i].default_value;
+                    if (value.size() == 1) {
+                        char text[32];
+                        std::snprintf(text, sizeof(text), "%.1f", value.front());
+                        draw_list->AddText(ImVec2(position.x + kNodeWidth - 12.0f - text_width(text),
+                                                  text_y),
+                                           ink.muted, text);
+                    }
+                }
+            }
             input_pins[node.id + "." + def->inputs[i].name] = {pin, def->inputs[i].type};
 
             ImGui::SetCursorScreenPos(ImVec2(pin.x - kPinRadius * 2, pin.y - kPinRadius * 2));
@@ -798,9 +938,12 @@ void draw_graph_panel(App& app) {
                              position.y + kHeaderHeight + kRowHeight * (static_cast<float>(i) + 0.5f));
             draw_list->AddCircleFilled(pin, kPinRadius, color_for(def->outputs[i].type, theme));
             const char* label = def->outputs[i].name.c_str();
-            const float width = ImGui::CalcTextSize(label).x;
-            draw_list->AddText(ImVec2(pin.x - width - 10.0f, pin.y - 7.0f),
-                               theme_u32(theme.graph_color("node_label")), label);
+            {
+                MonoScope mono(12.0f);
+                const float width = ImGui::CalcTextSize(label).x;
+                draw_list->AddText(ImVec2(pin.x - width - 12.0f, pin.y - ImGui::GetTextLineHeight() * 0.5f),
+                                   theme_u32(theme.graph_color("node_label")), label);
+            }
             output_pins[node.id + "." + def->outputs[i].name] = {pin, def->outputs[i].type};
 
             ImGui::SetCursorScreenPos(ImVec2(pin.x - kPinRadius * 2, pin.y - kPinRadius * 2));
@@ -883,15 +1026,16 @@ void draw_graph_panel(App& app) {
             const ImVec2 to(at.x + kNodeWidth, at.y + node_height(*def));
             draw_list->AddRectFilled(at, to,
                                      theme_u32(color_alpha(theme.graph_color("node_bg"), 0.59f)),
-                                     5.0f);
+                                     kNodeRounding);
             draw_list->AddRectFilled(at, ImVec2(to.x, at.y + kHeaderHeight),
-                                     (header_color(def->category, theme) & 0x00FFFFFFu) | (128u << IM_COL32_A_SHIFT), 5.0f,
+                                     (header_color(def->category, theme) & 0x00FFFFFFu) | (60u << IM_COL32_A_SHIFT), kNodeRounding,
                                      ImDrawFlags_RoundCornersTop);
             draw_list->AddRect(at, to,
                                theme_u32(color_alpha(theme.graph_color("node_border_selected"),
                                                      0.78f)),
-                               5.0f, 0, 1.5f);
-            draw_list->AddText(ImVec2(at.x + 8.0f, at.y + 5.0f),
+                               kNodeRounding, 0, 1.5f);
+            draw_list->AddText(ImVec2(at.x + 10.0f,
+                                      at.y + (kHeaderHeight - ImGui::GetTextLineHeight()) * 0.5f),
                                theme_u32(color_alpha(theme.graph_color("node_title"), 0.78f)),
                                def->label.c_str());
         }
@@ -938,6 +1082,23 @@ void draw_graph_panel(App& app) {
         if (ImGui::IsMouseReleased(ImGuiMouseButton_Left)) drag_from_node.clear();
     }
 
+    // How much is on the canvas, in the corner, over the grid.
+    {
+        const std::string summary =
+            std::to_string(graph->nodes.size()) + (graph->nodes.size() == 1 ? " node" : " nodes") +
+            " \xC2\xB7 " + std::to_string(graph->links.size()) +
+            (graph->links.size() == 1 ? " wire" : " wires");
+        FontScope small(nullptr, 12.0f);
+        const float margin = design_px(12.0f);
+        const float pad = design_px(10.0f);
+        const ImVec2 max(canvas_top_left.x + margin + pad * 2.0f + text_width(summary.c_str()),
+                         canvas_top_left.y + canvas_size.y - margin);
+        const ImVec2 min(canvas_top_left.x + margin, max.y - ImGui::GetFrameHeight());
+        overlay_frame(draw_list, min, max, ink);
+        draw_list->AddText(ImVec2(min.x + pad, (min.y + max.y - ImGui::GetTextLineHeight()) * 0.5f),
+                           ink.muted, summary.c_str());
+    }
+
     ImGui::EndChild();
 
     ImGui::SameLine(0.0f, 0.0f);
@@ -947,17 +1108,24 @@ void draw_graph_panel(App& app) {
     ImGui::SameLine(0.0f, 0.0f);
     ImGui::BeginChild("##inspector", ImVec2(inspector_width, 0), true);
     ImGui::PushTextWrapPos(0.0f);
-    draw_inspector(*graph, selected_node, changed);
+    draw_inspector(*graph, selected_node, changed, theme);
 
-    ImGui::SeparatorText("Validation");
+    ImGui::Spacing();
+    ImGui::Separator();
+    caps_label("Validation", ink);
     const Diagnostics diagnostics = validate_graph(*graph);
     if (diagnostics.empty()) {
-        ImGui::TextColored(ImVec4(0.45f, 0.8f, 0.45f, 1.0f), "no problems");
+        status_dot(ink.ok);
+        ImGui::SameLine(0.0f, design_px(8.0f));
+        colored_text("No problems", ink.ok);
     }
     for (const auto& d : diagnostics) {
-        const ImVec4 color = d.severity == Severity::Error ? ImVec4(0.92f, 0.42f, 0.42f, 1.0f)
-                                                           : ImVec4(0.92f, 0.75f, 0.35f, 1.0f);
-        ImGui::TextColored(color, "%s", d.message.c_str());
+        const ImU32 color = d.severity == Severity::Error ? ink.error : ink.warn;
+        status_dot(color);
+        ImGui::SameLine(0.0f, design_px(8.0f));
+        ImGui::PushStyleColor(ImGuiCol_Text, color);
+        ImGui::TextUnformatted(d.message.c_str());
+        ImGui::PopStyleColor();
     }
     ImGui::PopTextWrapPos();
     ImGui::EndChild();

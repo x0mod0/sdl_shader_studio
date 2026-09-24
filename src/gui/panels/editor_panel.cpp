@@ -1,11 +1,13 @@
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstddef>
 #include <cstdio>
 #include <iterator>
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <system_error>
@@ -18,9 +20,11 @@
 #include <imgui_internal.h>  // GetCurrentTabBar, for the order the tabs are shown in
 
 #include "app.h"
+#include "fonts.h"
 #include "panel_common.h"
 #include "tab_scope.h"
 #include "text_editor.h"
+#include "widgets.h"
 
 namespace ssstudio::gui {
 namespace {
@@ -98,23 +102,56 @@ std::string display_name(const Document& doc) {
 
 const char* stage_label(Stage s) { return stage_suffix(s); }
 
-void draw_document_header(App& app, Document& doc) {
-    // The path gets a line of its own: it is the one piece here that can be long
-    // enough to wrap, and the status below would be pushed off-panel with it.
-    ImGui::TextDisabled("%s", doc.path.generic_string().c_str());
+/// The language a shader is written in, the way the header names it.
+const char* language_name(Language language) {
+    return language == Language::GLSL ? "GLSL" : "HLSL";
+}
 
-    // Status, the modified marker and Save share a line until the panel is too
-    // narrow, and then fold onto as many as they need.
-    FlowLayout row;
+void draw_document_header(App& app, Document& doc, const ThemeInk& ink) {
+    // Where the file is and how its last compile went, on one line: the path on
+    // the left, the verdict and the file's language on the right. On a panel
+    // too narrow for both, the verdict folds under the path rather than
+    // pushing it off the edge.
+    //
+    // The path is spelled from the directory holding the project, so it starts
+    // with the project's own name - which is the part that says which of two
+    // similar shaders this is.
+    std::error_code ec;
+    std::filesystem::path shown =
+        std::filesystem::relative(doc.path, app.project().root.parent_path(), ec);
+    if (ec || shown.empty() || shown.native().rfind("..", 0) == 0) shown = doc.path;
+    const std::string folder =
+        shown.has_parent_path() ? shown.parent_path().generic_string() + "/" : std::string();
+    const std::string file = shown.filename().string();
+
+    const float row_width = ImGui::GetContentRegionAvail().x;
+    ImGui::BeginGroup();
+    {
+        MonoScope mono(11.0f);
+        colored_text(folder, ink.muted);
+        ImGui::SameLine(0.0f, 0.0f);
+        colored_text(file, ink.soft);
+    }
+    ImGui::EndGroup();
+    // Hover for the whole of it and click to copy, the way every other path in
+    // the interface behaves.
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+        if (ImGui::IsItemClicked()) {
+            ImGui::SetClipboardText(external_path(doc.path).string().c_str());
+        }
+        ImGui::SetItemTooltip("%s\nClick to copy", external_path(doc.path).string().c_str());
+    }
+    const float path_width = ImGui::GetItemRectSize().x;
+
+    // The verdict.
     char status[96];
+    ImU32 status_color = ink.muted;
     if (doc.compiling) {
         std::snprintf(status, sizeof(status), "compiling...");
-        row.next(text_width(status));
-        ImGui::TextDisabled("%s", status);
     } else if (doc.compiled_ok) {
-        std::snprintf(status, sizeof(status), "ok (%.0f ms)", doc.last_compile_ms);
-        row.next(text_width(status));
-        ImGui::TextColored(theme_vec4(app.theme().success()), "%s", status);
+        std::snprintf(status, sizeof(status), "ok \xC2\xB7 %.0f ms", doc.last_compile_ms);
+        status_color = ink.ok;
     } else if (!doc.diagnostics.empty()) {
         int errors = 0, warnings = 0;
         for (const auto& d : doc.diagnostics) {
@@ -122,19 +159,46 @@ void draw_document_header(App& app, Document& doc) {
             if (d.severity == Severity::Warning) ++warnings;
         }
         std::snprintf(status, sizeof(status), "%d error(s), %d warning(s)", errors, warnings);
-        row.next(text_width(status));
-        ImGui::TextColored(theme_vec4(app.theme().diagnostic(Severity::Error)), "%s", status);
+        status_color = ink.error;
     } else {
         std::snprintf(status, sizeof(status), "not compiled yet");
-        row.next(text_width(status));
-        ImGui::TextDisabled("%s", status);
     }
 
+    // What the file is written in, and how Tab indents it.
+    char details[64] = "";
+    if (const ShaderDesc* desc = app.project().find_shader(doc.id)) {
+        const auto& editor = app.settings().editor;
+        std::snprintf(details, sizeof(details), "%s \xC2\xB7 %s",
+                      language_name(app.project().language_of(*desc)),
+                      editor.insert_spaces
+                          ? ("spaces " + std::to_string(editor.tab_width)).c_str()
+                          : "tabs");
+    }
+
+    FontScope small(nullptr, 12.0f);
+    const float gap = design_px(6.0f);
+    const float group_gap = design_px(12.0f);
+    float right_width = design_px(6.0f) + gap + text_width(status);
+    if (details[0] != '\0') right_width += group_gap + text_width(details);
+    if (doc.dirty) right_width += text_width("modified") + gap + button_width("Save") + group_gap;
+
+    if (path_width + group_gap + right_width <= row_width) same_line_right_aligned(right_width);
+
+    // Unsaved edits come first, where the eye lands, with the way to keep them
+    // beside the word.
     if (doc.dirty) {
-        row.next(text_width("| modified"));
-        ImGui::TextColored(theme_vec4(app.theme().diagnostic(Severity::Warning)), "| modified");
-        row.next(button_width("Save"));
+        ImGui::AlignTextToFramePadding();
+        colored_text("modified", ink.warn);
+        ImGui::SameLine(0.0f, gap);
         if (ImGui::SmallButton("Save")) app.save_document(doc);
+        ImGui::SameLine(0.0f, group_gap);
+    }
+    status_dot(status_color);
+    ImGui::SameLine(0.0f, gap);
+    colored_text(status, status_color);
+    if (details[0] != '\0') {
+        ImGui::SameLine(0.0f, group_gap);
+        colored_text(details, ink.muted);
     }
 
     // A shader a graph writes. Said here rather than left for the user to
@@ -302,6 +366,166 @@ void open_containing_directory(App& app, const std::filesystem::path& file) {
         app.log(Severity::Warning,
                 std::string("could not open ") + directory.string() + ": " + SDL_GetError());
     }
+}
+
+/// The shader tab bar's look: pills in the code font rather than tabs hanging
+/// from an overline. Still ImGui's own tab bar underneath - reordering by drag,
+/// scrolling when the row overflows, the list button and the close buttons all
+/// keep working - only its colours and metrics change.
+///
+/// Suspendable, because a tab's context menu and tooltip are drawn from inside
+/// the bar, and neither should come out in the code font with pill padding.
+class PillTabStyle {
+public:
+    /// The fills are taken from the theme's own button colours, read here
+    /// before anything is pushed: a selected pill is filled the way a button
+    /// is, which is what makes it read as the one that is on.
+    explicit PillTabStyle(const ThemeInk& ink)
+        : ink_(ink),
+          selected_fill_(ImGui::GetColorU32(ImGuiCol_Button)),
+          selected_hover_fill_(ImGui::GetColorU32(ImGuiCol_ButtonHovered)),
+          hover_fill_(with_alpha(ink.raised, 0.0f)) {
+        push();
+    }
+    ~PillTabStyle() {
+        if (pushed_) pop();
+    }
+    PillTabStyle(const PillTabStyle&) = delete;
+    PillTabStyle& operator=(const PillTabStyle&) = delete;
+
+    void suspend() {
+        if (pushed_) pop();
+    }
+    void resume() {
+        if (!pushed_) push();
+    }
+
+    /// The colours of the one tab about to be submitted, from which of its
+    /// three states it is in. ImGui paints any tab under the pointer in the
+    /// hover colour, the selected one included - so the selected tab gets a
+    /// hover colour of its own, a step up from its fill, and keeps looking
+    /// selected while it is pointed at. Undone by pop_item().
+    void push_item(bool selected, bool hovered) {
+        ImGui::PushStyleColor(ImGuiCol_Text, selected || hovered ? ink_.text : ink_.soft);
+        ImGui::PushStyleColor(ImGuiCol_TabHovered, selected ? selected_hover_fill_ : hover_fill_);
+    }
+    void pop_item() { ImGui::PopStyleColor(2); }
+
+private:
+    void push() {
+        const ImU32 clear = with_alpha(ink_.raised, 0.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_TabRounding, design_px(5.0f));
+        ImGui::PushStyleVar(ImGuiStyleVar_TabBarOverlineSize, 0.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_TabBarBorderSize, 0.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_TabBorderSize, 0.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(design_px(10.0f), design_px(7.0f)));
+        ImGui::PushStyleColor(ImGuiCol_Tab, clear);
+        ImGui::PushStyleColor(ImGuiCol_TabHovered, hover_fill_);
+        ImGui::PushStyleColor(ImGuiCol_TabSelected, selected_fill_);
+        ImGui::PushStyleColor(ImGuiCol_TabSelectedOverline, clear);
+        ImGui::PushStyleColor(ImGuiCol_TabDimmed, clear);
+        ImGui::PushStyleColor(ImGuiCol_TabDimmedSelected, selected_fill_);
+        ImGui::PushStyleColor(ImGuiCol_TabDimmedSelectedOverline, clear);
+        ImGui::PushFont(mono_font(), type_size(12.0f));
+        // The close button only under the pointer, on the selected tab as on
+        // the others: its slot is where the status dot sits the rest of the
+        // time, the way ImGui's own unsaved-document marker shares it. There is
+        // no style variable for this, so the field is set and put back.
+        ImGuiStyle& style = ImGui::GetStyle();
+        saved_close_width_ = style.TabCloseButtonMinWidthSelected;
+        style.TabCloseButtonMinWidthSelected = 0.0f;
+        pushed_ = true;
+    }
+    void pop() {
+        ImGui::GetStyle().TabCloseButtonMinWidthSelected = saved_close_width_;
+        ImGui::PopFont();
+        ImGui::PopStyleColor(7);
+        ImGui::PopStyleVar(5);
+        pushed_ = false;
+    }
+
+    const ThemeInk& ink_;
+    /// The selected pill, the selected pill under the pointer, and any other
+    /// pill under the pointer. The last is no fill at all: a pointed-at tab is
+    /// outlined instead (see draw_tab_decorations), so the one filled pill in
+    /// the row is always the selected one - and ImGui fills a tab with its top
+    /// corners rounded only, which reads as a tab rather than a pill.
+    ImU32 selected_fill_ = 0;
+    ImU32 selected_hover_fill_ = 0;
+    ImU32 hover_fill_ = 0;
+    bool pushed_ = false;
+    float saved_close_width_ = 0.0f;
+};
+
+/// The stage suffix's size: a step below the name, and no smaller, so "frag"
+/// and "vert" stay readable at a glance rather than only on inspection.
+constexpr float kTabSuffixSize = 11.0f;
+
+/// What a shader tab's dot says: a failed compile first, because that is what
+/// the dot is for, then warnings, then unsaved edits. Zero for nothing to say.
+ImU32 tab_status_color(const Document& doc, const ThemeInk& ink) {
+    if (!doc.compiled_ok && !doc.compiling && !doc.diagnostics.empty()) return ink.error;
+    for (const auto& d : doc.diagnostics) {
+        if (d.severity == Severity::Warning) return ink.warn;
+    }
+    if (doc.dirty) return ink.accent_ink;
+    return 0;
+}
+
+/// Room after a tab's name for the stage suffix, as spaces in the tab's own
+/// font - which is what the label is measured in. The suffix is then drawn into
+/// that room by draw_tab_decorations().
+std::string tab_label_padding(const char* suffix) {
+    float needed = 0.0f;
+    {
+        FontScope small(mono_font(), kTabSuffixSize);
+        needed = ImGui::CalcTextSize(suffix).x;
+    }
+    needed += design_px(8.0f);
+    const float space = std::max(1.0f, ImGui::CalcTextSize(" ").x);
+    return std::string(static_cast<std::size_t>(std::ceil(needed / space)), ' ');
+}
+
+/// The stage suffix over the room tab_label_padding() left, the status dot in
+/// the close button's slot while the close button is not showing, and the
+/// outline the selected pill carries. Called right after the tab item is
+/// submitted, while its rectangle is the last item's.
+void draw_tab_decorations(const std::string& name, const char* suffix, bool selected, ImU32 dot,
+                          const ThemeInk& ink) {
+    const ImVec2 min = ImGui::GetItemRectMin();
+    const ImVec2 max = ImGui::GetItemRectMax();
+    const bool hovered = ImGui::IsItemHovered();
+    const ImVec2 padding = ImGui::GetStyle().FramePadding;
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+    draw_list->PushClipRect(min, max, true);
+    // ImGui trims a pixel off the top of every tab so it can sit flush against
+    // the bar's edge; the outlines follow the same shape. The selected pill
+    // takes the strong line, as half of what says which shader is in front;
+    // one under the pointer takes the subtle one and no fill, so pointing at a
+    // tab can never be mistaken for having selected it.
+    if (selected) {
+        draw_list->AddRect(ImVec2(min.x, min.y + 1.0f), max, ink.strong, design_px(5.0f));
+    } else if (hovered) {
+        draw_list->AddRect(ImVec2(min.x, min.y + 1.0f), max, ink.subtle, design_px(5.0f));
+    }
+    const float center_y = (min.y + 1.0f + max.y) * 0.5f;
+    {
+        // A step quieter than the name in every state, never so quiet it
+        // cannot be read: the stage is what tells two shaders of one name
+        // apart.
+        const float x = min.x + padding.x + ImGui::CalcTextSize(name.c_str()).x + design_px(8.0f);
+        FontScope small(mono_font(), kTabSuffixSize);
+        draw_list->AddText(ImVec2(x, center_y - ImGui::GetTextLineHeight() * 0.5f),
+                           selected || hovered ? ink.soft : ink.muted, suffix);
+    }
+    // Where TabItemEx puts the close button: its own frame padding in from the
+    // right edge, a font size wide.
+    if (dot != 0 && !hovered) {
+        const float size = design_px(6.0f);
+        draw_list->AddCircleFilled(
+            ImVec2(max.x - padding.x - ImGui::GetFontSize() * 0.5f, center_y), size * 0.5f, dot);
+    }
+    draw_list->PopClipRect();
 }
 
 }  // namespace
@@ -516,15 +740,47 @@ void draw_editor_panel(App& app) {
     // tab item shares the tab bar's scrolling space, so as soon as the shader
     // tabs overflow the panel the button scrolls out of reach - which is exactly
     // the moment someone is most likely to be adding another shader. The table
-    // reserves its width, so the bar can never grow underneath it.
+    // reserves its width, so the bar can never grow underneath it. The way to
+    // the node graph shares the column, for the same reason.
+    const ThemeInk ink(app.theme());
     const float add_width = ImGui::GetFrameHeight();
+    const float tools_width = add_width + ImGui::GetStyle().ItemSpacing.x + button_width("Graph");
     ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(0.0f, 0.0f));
-    const bool row = ImGui::BeginTable("##shader_tab_row", 2, ImGuiTableFlags_SizingFixedFit);
+    const bool row = ImGui::BeginTable("##shader_tab_row", 3, ImGuiTableFlags_SizingFixedFit);
     ImGui::PopStyleVar();
     if (row) {
+        ImGui::TableSetupColumn("##list", ImGuiTableColumnFlags_WidthFixed, add_width);
         ImGui::TableSetupColumn("##tabs", ImGuiTableColumnFlags_WidthStretch);
-        ImGui::TableSetupColumn("##add", ImGuiTableColumnFlags_WidthFixed, add_width);
+        ImGui::TableSetupColumn("##add", ImGuiTableColumnFlags_WidthFixed, tools_width);
         ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+
+        // Every open tab by its full name, stage and all, for when the row has
+        // scrolled some of them out of sight. ImGui's own list button would
+        // read the labels, and those no longer carry the stage - it is drawn
+        // beside the name instead - so two shaders called "sprite" would read
+        // the same there. Picking one selects its tab, which scrolls the bar
+        // to it.
+        ImGui::PushStyleColor(ImGuiCol_Button, with_alpha(ink.raised, 0.0f));
+        ImGui::PushStyleColor(ImGuiCol_Border, with_alpha(ink.raised, 0.0f));
+        ImGui::PushStyleColor(ImGuiCol_Text, ink.muted);
+        const bool list = ImGui::ArrowButton("##tab_list", ImGuiDir_Down);
+        ImGui::PopStyleColor(3);
+        ImGui::SetItemTooltip("Open shaders");
+        if (list) ImGui::OpenPopup("##tab_list_menu");
+        if (ImGui::BeginPopup("##tab_list_menu")) {
+            const Document* front = app.active_document();
+            for (const std::string& id : order) {
+                const Document* doc = app.find_document(id);
+                if (doc == nullptr || !doc->open_in_editor) continue;
+                const std::string label = display_name(*doc) + " (" + stage_label(doc->stage) +
+                                          ")" + (doc->dirty ? " *" : "") + "##" + doc->id;
+                if (ImGui::Selectable(label.c_str(), front != nullptr && front->id == doc->id)) {
+                    app.reveal(doc->id, 0);
+                }
+            }
+            ImGui::EndPopup();
+        }
         ImGui::TableNextColumn();
     }
 
@@ -534,9 +790,14 @@ void draw_editor_panel(App& app) {
     // popup the context menu draws in has a stack of its own.
     std::vector<std::pair<std::string, ImGuiID>> submitted;
 
+    // Which tab was in front last frame, so the others can be drawn in the
+    // quieter ink before BeginTabItem has said which one is selected now.
+    const Document* current = app.active_document();
+    const std::string current_id = current ? current->id : std::string();
+
+    std::optional<PillTabStyle> pill_style(std::in_place, ink);
     if (ImGui::BeginTabBar("##shaders", ImGuiTabBarFlags_Reorderable |
-                                            ImGuiTabBarFlags_FittingPolicyScroll |
-                                            ImGuiTabBarFlags_TabListPopupButton)) {
+                                            ImGuiTabBarFlags_FittingPolicyScroll)) {
         for (auto& doc : app.documents()) {
             if (!doc.open_in_editor) continue;
             // Everything after "###" is the tab's ImGui id and nothing before it
@@ -550,13 +811,22 @@ void draw_editor_panel(App& app) {
             // "plasma_frag" would share that tab: switching between them would
             // hand the second project the first one's position in the row, and
             // that wrong order is now something that gets written to disk.
-            const std::string label = display_name(doc) + " (" + stage_label(doc.stage) + ")" +
-                                      (doc.dirty ? " *" : "") + "###" + session_key + '\x1f' +
-                                      doc.id;
+            //
+            // The stage and the state are not in the label's text: the stage is
+            // drawn smaller and dimmer after the name, and unsaved edits and
+            // compile problems are the dot after that (see tab_status_color).
+            // The label only reserves the room they are drawn into.
+            //
+            // The dot can only say one thing, and a compile problem outranks
+            // unsaved edits. When it is saying the problem, the name carries
+            // the unsaved marker it always had, so a tab in the background
+            // never hides that it holds edits.
+            const ImU32 dot = tab_status_color(doc, ink);
+            const std::string name =
+                display_name(doc) + (doc.dirty && dot != ink.accent_ink ? " *" : "");
+            const std::string label = name + tab_label_padding(stage_label(doc.stage)) + "###" +
+                                      session_key + '\x1f' + doc.id;
             ImGuiTabItemFlags flags = ImGuiTabItemFlags_None;
-            if (!doc.compiled_ok && !doc.compiling && !doc.diagnostics.empty()) {
-                flags |= ImGuiTabItemFlags_UnsavedDocument;  // draws the marker dot
-            }
             // Someone clicked a diagnostic for this shader: pull its tab to the
             // front so the scroll below lands somewhere the user can see.
             const bool revealing = app.reveal_request_id() == doc.id;
@@ -566,9 +836,17 @@ void draw_editor_panel(App& app) {
             // nothing else - the shader stays in the project, which is why it
             // needs no confirmation even with unsaved edits in the buffer.
             bool keep_open = true;
+            const bool in_front = doc.id == current_id;
+            // Whether the pointer is on this tab, known before it is drawn: the
+            // tab's id is its label hashed inside the bar, and the hovered id
+            // is last frame's until an item claims it this frame.
+            const bool pointed_at = ImGui::GetHoveredID() == ImGui::GetID(label.c_str());
+            pill_style->push_item(in_front, pointed_at);
             const bool tab_open = ImGui::BeginTabItem(label.c_str(), &keep_open, flags);
+            pill_style->pop_item();
             submitted.emplace_back(doc.id, ImGui::GetItemID());
             if (!keep_open) request.close.push_back(doc.id);
+            draw_tab_decorations(name, stage_label(doc.stage), tab_open, dot, ink);
 
             // Before anything inside the tab is submitted, so the menu is
             // attached to the tab button itself - and outside the `tab_open`
@@ -577,11 +855,16 @@ void draw_editor_panel(App& app) {
             // Two shaders of one name and stage in different languages read the
             // same on a tab, so the file - which is never ambiguous - is one
             // hover away.
+            //
+            // Both drawn with the pill style set aside: they are windows of
+            // their own, and should read like every other menu and tooltip.
+            pill_style->suspend();
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("%s", doc.path.generic_string().c_str());
             }
 
             draw_shader_tab_menu(app, doc, order, request);
+            pill_style->resume();
 
             if (tab_open) {
                 selected = &doc;
@@ -611,10 +894,16 @@ void draw_editor_panel(App& app) {
         }
         ImGui::EndTabBar();
     }
+    pill_style.reset();
 
     if (row) {
         ImGui::TableNextColumn();
-        if (ImGui::Button("+", ImVec2(add_width, 0.0f))) ImGui::OpenPopup("##add_shader_menu");
+        ImGui::PushStyleColor(ImGuiCol_Button, with_alpha(ink.raised, 0.0f));
+        ImGui::PushStyleColor(ImGuiCol_Border, with_alpha(ink.raised, 0.0f));
+        ImGui::PushStyleColor(ImGuiCol_Text, ink.muted);
+        const bool add = ImGui::Button("+", ImVec2(add_width, 0.0f));
+        ImGui::PopStyleColor(3);
+        if (add) ImGui::OpenPopup("##add_shader_menu");
         // Taken before the tooltip, which begins and ends a window of its own
         // between here and the menu below.
         const ImVec2 menu_anchor = ImGui::GetItemRectMax();
@@ -631,6 +920,16 @@ void draw_editor_panel(App& app) {
             draw_open_closed_items(app, request);
             ImGui::EndPopup();
         }
+
+        // The node graph for the shader in front. Raised rather than toggled:
+        // picking it when it is already open means "show me", as View > Graph
+        // does.
+        ImGui::SameLine();
+        if (ghost_button("Graph", ink)) {
+            app.show_graph = true;
+            app.request_panel_focus("Graph");
+        }
+        ImGui::SetItemTooltip("Open the node graph for the shader in front");
         ImGui::EndTable();
     }
 
@@ -658,8 +957,8 @@ void draw_editor_panel(App& app) {
     if (selected) {
         Document& doc = *selected;
         app.focus_document(doc.id);
-        draw_document_header(app, doc);
-        ImGui::Separator();
+        draw_document_header(app, doc, ink);
+        ImGui::Dummy(ImVec2(0.0f, design_px(2.0f)));
 
         // Per document: a project can mix an HLSL vertex shader with a GLSL
         // fragment one, and the two color against different words.
@@ -692,6 +991,7 @@ void draw_editor_panel(App& app) {
             app.mark_dirty(doc);
         }
         doc.cursor_line = editor.cursor_line();
+        doc.cursor_column = editor.cursor_column();
         completion_showing = editor.completion_open();
     }
 

@@ -18,7 +18,9 @@
 #endif
 
 #include "panels/panel_common.h"
+#include "native_menu.h"
 #include "tab_scope.h"
+#include "widgets.h"
 #include "preview/renderer.h"
 #include "preview/texture_registry.h"
 #include "scene/scene.h"
@@ -221,6 +223,9 @@ bool App::init(SDL_Window* window, SDL_GPUDevice* device) {
 
     reload_theme_packs();
     apply_current_theme();
+    // Before the first NewFrame(), so the very first frame is drawn in the
+    // theme's fonts rather than flashing the built-in one.
+    before_frame();
 
     auto backend = create_default_backend(settings_.tools.shadercross_dir);
     backend_name_ = backend->name();
@@ -693,6 +698,7 @@ std::filesystem::path App::user_themes_dir() const {
 
 void App::reload_theme_packs() {
     theme_packs_.clear();
+    theme_previews_.clear();
     // theme_pack_paths() hands back bundled, then user, then project, so
     // assigning in order is what makes a later root win an id collision.
     for (const auto& path : theme_pack_paths(theme_roots())) {
@@ -772,7 +778,61 @@ void App::apply_current_theme() {
     theme_watch_.reset(watched == theme_packs_.end() ? std::filesystem::path{}
                                                      : watched->second.file);
 
-    apply_theme(theme_, settings_.ui.ui_scale);
+    // The style is rebuilt before the next frame rather than now: this is
+    // usually called from inside one, and ImGui writes the size of the font in
+    // effect back into the style whenever a font is popped - so a new text size
+    // set mid-frame was overwritten by the next PopFont() and never reached the
+    // frame after. See before_frame().
+    style_pending_ = true;
+    request_fonts();
+}
+
+void App::request_fonts() {
+    FontChoice choice;
+    choice.ui = theme_.font_ui;
+    // The size the text will be drawn at, so the built-in font can be the one
+    // that stays sharp there (see FontChoice::size).
+    choice.size = ui_font_size_in_effect(settings_.ui.font_size, theme_.font_ui_size);
+    // The user's own font outranks the theme's: a font is often an
+    // accessibility choice, and a theme change must not undo one.
+    choice.mono = settings_.editor.font_path.empty()
+                      ? theme_.font_editor
+                      : std::filesystem::path(settings_.editor.font_path);
+    fonts_.request(choice);
+}
+
+void App::before_frame() {
+    if (style_pending_) {
+        style_pending_ = false;
+        apply_theme(theme_, settings_.ui.ui_scale, settings_.ui.font_size);
+    }
+    if (!fonts_.pending()) return;
+    for (const std::string& problem : fonts_.apply()) log(Severity::Info, problem);
+}
+
+const std::vector<ResolvedTheme>& App::theme_previews() {
+    if (!theme_previews_.empty()) return theme_previews_;
+
+    ThemeResolveContext context;
+    context.available = theme_packs_;
+    context.fallback_syntax_palette = settings_.editor.syntax_theme;
+    // Packs first, the way the design lists them: the themes someone installed
+    // are the ones they are most likely to be choosing between.
+    for (const auto& [id, pack] : theme_packs_) {
+        ResolvedTheme resolved;
+        Diagnostics ignored;  // reported when the pack is applied, not here
+        if (!resolve_theme(pack, context, resolved, ignored)) {
+            // Refused packs still get a card, showing the base they would fall
+            // back to, under their own name so they can still be found.
+            resolved.id = id;
+            resolved.name = pack.name.empty() ? id : pack.name;
+        }
+        theme_previews_.push_back(std::move(resolved));
+    }
+    for (const char* id : {"dark", "light", "classic"}) {
+        theme_previews_.push_back(builtin_resolved_theme(id, settings_.editor.syntax_theme));
+    }
+    return theme_previews_;
 }
 
 std::filesystem::path App::projects_dir() const {
@@ -2106,30 +2166,42 @@ void App::apply_panel_focus() {
 }
 
 void App::draw_dockspace() {
+    const ThemeInk ink(theme_);
+
+    // Both bars before the host. Each takes its height out of the viewport's
+    // work area, and the host below is sized from what is left - so the menus,
+    // the project pills and the status line can never be covered by a panel.
+    draw_top_bar(ink);
+    draw_status_bar(ink);
+
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->WorkPos);
     ImGui::SetNextWindowSize(viewport->WorkSize);
     ImGui::SetNextWindowViewport(viewport->ID);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    // The gutter: panels float a separator's width in from every edge, and the
+    // host's own background is what shows between them. Painted in the darker
+    // surface.base while the panels are surface.raised, which is what makes
+    // them read as cards rather than as regions of one surface.
+    const float gutter = ImGui::GetStyle().DockingSeparatorSize;
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(gutter, gutter));
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ink.base);
 
     ImGuiWindowFlags flags = ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoTitleBar |
                              ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize |
                              ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus |
-                             ImGuiWindowFlags_NoNavFocus | ImGuiWindowFlags_MenuBar;
+                             ImGuiWindowFlags_NoNavFocus;
 
     ImGui::Begin("##dockhost", nullptr, flags);
     ImGui::PopStyleVar(3);
 
-    draw_menu_bar();
-
-    // Between the menu bar and the panels, so it reads as "which project the
-    // window below belongs to" rather than as one more panel tab.
-    draw_project_tabs();
-
     const ImGuiID dock_id = ImGui::GetID("MainDockspace");
     ImGui::DockSpace(dock_id, ImVec2(0, 0), ImGuiDockNodeFlags_PassthruCentralNode);
+    // Only now: the splitters between docked panels are painted in whatever
+    // the window background is while DockSpace() runs, and they are the gutter
+    // too.
+    ImGui::PopStyleColor();
 
     if (layout_pending_ || !layout_initialized_) {
         layout_pending_ = false;
@@ -2226,55 +2298,6 @@ void App::draw_dockspace() {
     }
 
     ImGui::End();
-}
-
-void App::draw_project_tabs() {
-    if (sessions_.empty()) {
-        pending_activate_key_.clear();
-        return;
-    }
-
-    // A close from a tab is applied after the bar is drawn: erasing a session
-    // mid-iteration would pull the vector out from under the loop, and the tab
-    // bar still has an EndTabBar owed to it.
-    int close_request = -1;
-
-    // Deliberately not Reorderable: a drag would move the tab in ImGui's own
-    // list only, and the order the tabs are in would stop matching the order
-    // Ctrl+PageDown and the Window menu walk.
-    if (ImGui::BeginTabBar("##projects", ImGuiTabBarFlags_FittingPolicyScroll |
-                                             ImGuiTabBarFlags_TabListPopupButton)) {
-        for (std::size_t i = 0; i < sessions_.size(); ++i) {
-            ProjectSession& session = *sessions_[i];
-
-            // The name is the label; the key is the identity. A project whose
-            // name changes keeps its tab, and two projects that happen to share
-            // a name still get a tab each.
-            std::string label = session.project.name;
-            if (label.empty()) label = "Untitled";
-            if (session.has_unsaved_changes()) label += " *";
-            label += "###project_" + session.key;
-
-            ImGuiTabItemFlags flags = ImGuiTabItemFlags_None;
-            if (pending_activate_key_ == session.key) flags |= ImGuiTabItemFlags_SetSelected;
-
-            bool keep_open = true;
-            if (ImGui::BeginTabItem(label.c_str(), &keep_open, flags)) {
-                // Clicking a tab is how the UI changes project: everything the
-                // panels draw comes from the active session.
-                activate_session(static_cast<int>(i));
-                ImGui::EndTabItem();
-            }
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("%s", session.project.root.string().c_str());
-            }
-            if (!keep_open) close_request = static_cast<int>(i);
-        }
-        ImGui::EndTabBar();
-    }
-    pending_activate_key_.clear();
-
-    if (close_request >= 0) request_close_session(close_request);
 }
 
 void App::draw_close_project_modal() {
@@ -2791,183 +2814,207 @@ void App::draw_delete_shader_modal() {
 }
 
 void App::draw_menu_bar() {
-    if (!ImGui::BeginMenuBar()) return;
+    // Drawn into the top bar's menu bar, which draw_top_bar() has begun.
+    draw_imgui_menus(build_menus());
+}
 
-    if (ImGui::BeginMenu("File")) {
-        if (ImGui::MenuItem("New project...", "Ctrl+N")) prompt_new_project();
-        if (ImGui::MenuItem("Open project...", "Ctrl+O")) prompt_open_project();
-        if (ImGui::BeginMenu("Open recent", !settings_.recent_projects.empty())) {
-            std::filesystem::path chosen;
-            bool forget_missing = false;
-            for (const auto& p : settings_.recent_projects) {
-                // A project moved or deleted since last run still lists, greyed
-                // out, so the entry explains itself rather than failing on click.
-                std::error_code ec;
-                const bool exists = std::filesystem::exists(p, ec);
-                if (ImGui::MenuItem(p.string().c_str(), nullptr, false, exists)) chosen = p;
-                if (!exists && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-                    ImGui::SetTooltip("missing on disk");
+std::vector<Menu> App::build_menus() {
+    // Every callback captures values - an id, a key, a path - or `this`, never
+    // a pointer into a session or a list. A pick runs after the menus are done,
+    // and on macOS after the frame they were built in, by which time any such
+    // pointer could be pointing at something that has moved.
+    std::vector<Menu> menus;
+    const bool open = project_open();
+
+    // --- File --------------------------------------------------------------
+    {
+        Menu file{"File", {}};
+        file.items.push_back(
+            menu_action("file.new", "New project...", "Ctrl+N", [this] { prompt_new_project(); }));
+        file.items.push_back(menu_action("file.open", "Open project...", "Ctrl+O",
+                                         [this] { prompt_open_project(); }));
+        file.items.push_back(menu_submenu(
+            "file.recent", "Open recent",
+            [this] {
+                std::vector<MenuItem> items;
+                bool forget_missing = false;
+                for (std::size_t i = 0; i < settings_.recent_projects.size(); ++i) {
+                    const std::filesystem::path p = settings_.recent_projects[i];
+                    // A project moved or deleted since last run still lists,
+                    // greyed out, so the entry explains itself rather than
+                    // failing on click.
+                    std::error_code ec;
+                    const bool exists = std::filesystem::exists(p, ec);
+                    MenuItem item = menu_action("file.recent." + std::to_string(i), p.string(), "",
+                                                [this, p] { open_project(p); }, exists);
+                    if (!exists) item.tooltip = "missing on disk";
+                    items.push_back(std::move(item));
+                    forget_missing = forget_missing || !exists;
                 }
-                forget_missing = forget_missing || !exists;
-            }
-            ImGui::Separator();
-            if (ImGui::MenuItem("Forget missing projects", nullptr, false, forget_missing)) {
-                forget_missing_projects();
-            }
-            // Removing one entry is the landing screen's job - a menu that
-            // closes on every click is a poor place to prune a list item by
-            // item. What belongs here is the whole-list gesture.
-            if (ImGui::MenuItem("Clear recent projects")) clear_recent_projects();
-            ImGui::EndMenu();
-            if (!chosen.empty()) open_project(chosen);
-        }
-        ImGui::Separator();
-        if (ImGui::MenuItem("New shader...", "Ctrl+Shift+N", false, project_open())) {
-            prompt_new_shader();
-        }
+                items.push_back(menu_separator());
+                items.push_back(menu_action("file.recent.forget", "Forget missing projects", "",
+                                            [this] { forget_missing_projects(); }, forget_missing));
+                // Removing one entry is the landing screen's job - a menu that
+                // closes on every click is a poor place to prune a list item by
+                // item. What belongs here is the whole-list gesture.
+                items.push_back(menu_action("file.recent.clear", "Clear recent projects", "",
+                                            [this] { clear_recent_projects(); }));
+                return items;
+            },
+            !settings_.recent_projects.empty()));
+        file.items.push_back(menu_separator());
+        file.items.push_back(menu_action("file.new_shader", "New shader...", "Ctrl+Shift+N",
+                                         [this] { prompt_new_shader(); }, open));
         // Reachable from here as well as from a tab's context menu, because
         // closing the last tab leaves nothing to right-click.
-        const std::vector<std::string> closed = closed_documents();
-        if (ImGui::BeginMenu("Open shader", !closed.empty())) {
-            std::string chosen;
-            bool open_every = false;
-            for (const std::string& id : closed) {
-                const Document* doc = find_document(id);
-                if (!doc) continue;
-                // Named by file rather than by id: the id is the manifest's
-                // spelling and has no business in a menu of files to open.
-                const std::string label = doc->path.filename().string() + (doc->dirty ? " *" : "");
-                if (ImGui::MenuItem(label.c_str())) chosen = id;
-            }
-            ImGui::Separator();
-            if (ImGui::MenuItem("Open all")) open_every = true;
-            ImGui::EndMenu();
-            // After EndMenu: opening one reveals it, which the menu that is
-            // still being drawn has no business being in the middle of.
-            if (!chosen.empty()) open_document(chosen);
-            if (open_every) {
-                for (const std::string& id : closed) open_document(id);
-            }
-        }
-        if (ImGui::MenuItem("Import fullscreen shader...", nullptr, false, project_open())) {
-            prompt_import_shader();
-        }
-        ImGui::Separator();
-        if (ImGui::MenuItem("Save all", "Ctrl+S", false, project_open())) save_all();
+        file.items.push_back(menu_submenu(
+            "file.open_shader", "Open shader",
+            [this] {
+                std::vector<MenuItem> items;
+                for (const std::string& id : closed_documents()) {
+                    const Document* doc = find_document(id);
+                    if (!doc) continue;
+                    // Named by file rather than by id: the id is the manifest's
+                    // spelling and has no business in a menu of files to open.
+                    const std::string label =
+                        doc->path.filename().string() + (doc->dirty ? " *" : "");
+                    items.push_back(menu_action("file.open_shader." + id, label, "",
+                                                [this, id] { open_document(id); }));
+                }
+                items.push_back(menu_separator());
+                items.push_back(menu_action("file.open_shader.all", "Open all", "", [this] {
+                    for (const std::string& id : closed_documents()) open_document(id);
+                }));
+                return items;
+            },
+            !closed_documents().empty()));
+        file.items.push_back(menu_action("file.import", "Import fullscreen shader...", "",
+                                         [this] { prompt_import_shader(); }, open));
+        file.items.push_back(menu_separator());
+        file.items.push_back(
+            menu_action("file.save", "Save all", "Ctrl+S", [this] { save_all(); }, open));
         // Named, so it is clear this closes the one project in front and leaves
         // the other tabs alone.
-        const std::string close_label =
-            project_open() ? "Close " + project().name : std::string("Close project");
-        if (ImGui::MenuItem(close_label.c_str(), "Ctrl+W", false, project_open())) {
-            close_project();
-        }
-        ImGui::Separator();
-        if (ImGui::MenuItem("Settings", "Ctrl+,", &show_settings) && show_settings) {
-            request_panel_focus("Settings");
-        }
-        ImGui::Separator();
-        if (ImGui::MenuItem("Quit", "Ctrl+Q")) request_quit();
-        ImGui::EndMenu();
+        file.items.push_back(menu_action("file.close",
+                                         open ? "Close " + project().name : std::string("Close project"),
+                                         "Ctrl+W", [this] { close_project(); }, open));
+        file.items.push_back(menu_separator());
+        file.items.push_back(with_role(menu_action(
+                                           "file.settings", "Settings", "Ctrl+,",
+                                           [this] {
+                                               show_settings = !show_settings;
+                                               if (show_settings) request_panel_focus("Settings");
+                                           },
+                                           true, show_settings),
+                                       MenuItem::Role::Settings));
+        file.items.push_back(menu_separator());
+        file.items.push_back(with_role(
+            menu_action("file.quit", "Quit", "Ctrl+Q", [this] { request_quit(); }),
+            MenuItem::Role::Quit));
+        menus.push_back(std::move(file));
     }
 
-    if (ImGui::BeginMenu("Build")) {
-        const bool can = project_open() && !build_busy_;
+    // --- Build -------------------------------------------------------------
+    {
+        Menu build{"Build", {}};
+        const bool can = open && !build_busy_;
         for (const auto& profile : project().profiles) {
-            if (ImGui::MenuItem(profile.name.c_str(), nullptr, false, can)) {
-                start_build(profile.name, false);
-            }
+            const std::string name = profile.name;
+            build.items.push_back(menu_action("build.profile." + name, name, "",
+                                              [this, name] { start_build(name, false); }, can));
         }
-        ImGui::Separator();
-        if (ImGui::MenuItem("Dry run", "Ctrl+Shift+B", false, can)) start_build(std::string(), true);
-        if (ImGui::MenuItem("Recompile all", "F7", false, project_open())) compile_all();
-        ImGui::EndMenu();
+        build.items.push_back(menu_separator());
+        build.items.push_back(menu_action("build.dry", "Dry run", "Ctrl+Shift+B",
+                                          [this] { start_build(std::string(), true); }, can));
+        build.items.push_back(menu_action("build.compile_all", "Recompile all", "F7",
+                                          [this] { compile_all(); }, open));
+        menus.push_back(std::move(build));
     }
 
-    // One entry per open project, which is the keyboard-reachable half of the
-    // tab bar and the place the switching shortcuts advertise themselves.
-    if (ImGui::BeginMenu("Window")) {
+    // --- Window: one entry per open project, which is the keyboard-reachable
+    // half of the project pills and the place the switching shortcuts
+    // advertise themselves.
+    {
+        Menu window{"Window", {}};
         if (sessions_.empty()) {
-            ImGui::MenuItem("(no project open)", nullptr, false, false);
+            window.items.push_back(
+                menu_action("window.none", "(no project open)", "", nullptr, false));
         }
-        int activate = -1;
         for (std::size_t i = 0; i < sessions_.size(); ++i) {
             const ProjectSession& session = *sessions_[i];
             std::string label = session.project.name;
             if (session.has_unsaved_changes()) label += " *";
-            label += "###window_" + session.key;
-            if (ImGui::MenuItem(label.c_str(), nullptr,
-                                static_cast<int>(i) == active_session_)) {
-                activate = static_cast<int>(i);
-            }
+            // By key rather than by index: the index can move before the pick
+            // runs, if a project is closed in between.
+            const std::string key = session.key;
+            window.items.push_back(menu_action(
+                "window.project." + key, label, "",
+                [this, key] {
+                    const int index = index_of_session(key);
+                    if (index < 0) return;
+                    activate_session(index);
+                    pending_activate_key_ = key;
+                },
+                true, static_cast<int>(i) == active_session_));
         }
-        ImGui::Separator();
-        if (ImGui::MenuItem("Next project", "Ctrl+PageDown", false, sessions_.size() > 1)) {
-            cycle_session(1);
-        }
-        if (ImGui::MenuItem("Previous project", "Ctrl+PageUp", false, sessions_.size() > 1)) {
-            cycle_session(-1);
-        }
-        ImGui::EndMenu();
-        if (activate >= 0) {
-            activate_session(activate);
-            pending_activate_key_ = sessions_[static_cast<std::size_t>(activate)]->key;
-        }
+        window.items.push_back(menu_separator());
+        window.items.push_back(menu_action("window.next", "Next project", "Ctrl+PageDown",
+                                           [this] { cycle_session(1); }, sessions_.size() > 1));
+        window.items.push_back(menu_action("window.previous", "Previous project", "Ctrl+PageUp",
+                                           [this] { cycle_session(-1); }, sessions_.size() > 1));
+        menus.push_back(std::move(window));
     }
 
-    if (ImGui::BeginMenu("View")) {
+    // --- View --------------------------------------------------------------
+    {
+        Menu view{"View", {}};
         // Picking a panel that is already on means "show me that one", so it is
         // raised rather than silently left wherever it was buried.
         const auto panel_item = [this](const char* label, const char* window, bool& shown) {
-            if (!ImGui::MenuItem(label, nullptr, &shown)) return;
-            if (shown) request_panel_focus(window);
+            bool* flag = &shown;
+            const std::string name = window;
+            return menu_action(std::string("view.panel.") + window, label, "",
+                               [this, flag, name] {
+                                   *flag = !*flag;
+                                   if (*flag) request_panel_focus(name.c_str());
+                               },
+                               true, shown);
         };
-        panel_item("Editor", "Editor", show_editor);
-        panel_item("Preview", "Preview", show_preview);
-        panel_item("Inputs & Outputs", "Inputs & Outputs", show_io);
-        panel_item("Diagnostics", "Diagnostics", show_diagnostics);
-        panel_item("Build", "Build", show_build);
-        panel_item("Graph", "Graph", show_graph);
-        panel_item("Scene", "Scene", show_scene);
-        ImGui::Separator();
-        if (ImGui::MenuItem("Layout: Write")) apply_layout(LayoutPreset::Write);
-        if (ImGui::MenuItem("Layout: Tune")) apply_layout(LayoutPreset::Tune);
-        if (ImGui::MenuItem("Layout: Present")) apply_layout(LayoutPreset::Present);
-        if (ImGui::MenuItem("Layout: Build")) apply_layout(LayoutPreset::Build);
-        ImGui::Separator();
-        if (ImGui::MenuItem("Reset layout")) reset_layout();
-        ImGui::EndMenu();
+        view.items.push_back(panel_item("Editor", "Editor", show_editor));
+        view.items.push_back(panel_item("Preview", "Preview", show_preview));
+        view.items.push_back(panel_item("Inputs & Outputs", "Inputs & Outputs", show_io));
+        view.items.push_back(panel_item("Diagnostics", "Diagnostics", show_diagnostics));
+        view.items.push_back(panel_item("Build", "Build", show_build));
+        view.items.push_back(panel_item("Graph", "Graph", show_graph));
+        view.items.push_back(panel_item("Scene", "Scene", show_scene));
+        view.items.push_back(menu_separator());
+        view.items.push_back(menu_action("view.layout.write", "Layout: Write", "",
+                                         [this] { apply_layout(LayoutPreset::Write); }));
+        view.items.push_back(menu_action("view.layout.tune", "Layout: Tune", "",
+                                         [this] { apply_layout(LayoutPreset::Tune); }));
+        view.items.push_back(menu_action("view.layout.present", "Layout: Present", "",
+                                         [this] { apply_layout(LayoutPreset::Present); }));
+        view.items.push_back(menu_action("view.layout.build", "Layout: Build", "",
+                                         [this] { apply_layout(LayoutPreset::Build); }));
+        view.items.push_back(menu_separator());
+        view.items.push_back(
+            menu_action("view.layout.reset", "Reset layout", "", [this] { reset_layout(); }));
+        menus.push_back(std::move(view));
     }
 
-    // Where the app describes itself rather than doing anything: both entries
-    // answer a question ("which copy of this is running?", "where did it put my
-    // settings?") and neither changes a thing, which is why they are here and
-    // not in Settings.
-    if (ImGui::BeginMenu("Info")) {
-        if (ImGui::MenuItem("Configured paths...")) paths_modal_pending_ = true;
-        if (ImGui::MenuItem("About app...")) about_modal_pending_ = true;
-        ImGui::EndMenu();
+    // --- Info: where the app describes itself rather than doing anything.
+    // Both entries answer a question ("which copy of this is running?", "where
+    // did it put my settings?") and neither changes a thing, which is why they
+    // are here and not in Settings.
+    {
+        Menu info{"Info", {}};
+        info.items.push_back(menu_action("info.paths", "Configured paths...", "",
+                                         [this] { paths_modal_pending_ = true; }));
+        info.items.push_back(menu_action("info.about", "About app...", "",
+                                         [this] { about_modal_pending_ = true; }));
+        menus.push_back(std::move(info));
     }
-
-    // Right-aligned status: backend and build state. A build started from
-    // another tab says whose it is, so a busy Build button explains itself.
-    std::string status = backend_name_;
-    if (build_busy_) {
-        const std::string who = building_project_name();
-        status = who.empty() ? "building..." : "building " + who + "...";
-    }
-    // Right-aligned, but never dragged back on top of the menus: on a window too
-    // narrow to hold both, the status simply follows them and is clipped at the
-    // edge rather than drawn over "View".
-    const float width = ImGui::CalcTextSize(status.c_str()).x;
-    const float x = ImGui::GetWindowWidth() - width - 20.0f;
-    if (x > ImGui::GetCursorPosX()) {
-        ImGui::SameLine(x);
-    } else {
-        ImGui::SameLine();
-    }
-    ImGui::TextDisabled("%s", status.c_str());
-
-    ImGui::EndMenuBar();
+    return menus;
 }
 
 // ---------------------------------------------------------------------------
@@ -3623,6 +3670,8 @@ void App::draw_command_palette() {
 // Frame
 // ---------------------------------------------------------------------------
 void App::frame(float delta_seconds) {
+    // First, before any panel pushes a font of its own.
+    begin_type_frame();
     compiler_->poll();
     file_dialog_.poll();
 
@@ -3676,6 +3725,14 @@ void App::frame(float delta_seconds) {
     // Cleared after the decision and before the panels run, so the flag always
     // describes the frame about to be drawn rather than accumulating.
     preview_presented_ = false;
+
+    // Where the platform has a menu bar of its own, the menus are there rather
+    // than in the top bar: what was picked from them since the last frame
+    // first, then the menus as they stand after it.
+    if (native_menu::available()) {
+        native_menu::run_picked();
+        native_menu::publish(build_menus());
+    }
 
     draw_dockspace();
     handle_shortcuts();

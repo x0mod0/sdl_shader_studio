@@ -4,10 +4,12 @@ This directory holds theme packs. A pack is a TOML file that repaints the
 application: the interface, the editor's syntax and diagnostic colours, the node
 graph, and the chrome around the preview.
 
-Two packs ship here:
+Four packs ship here:
 
 | File | What it is |
 |---|---|
+| `tide-dark.s3theme/` | The application's own look, and what a fresh install opens with. A directory pack, so it can name its fonts - see the README in its `fonts/` folder. |
+| `tide-light.s3theme/` | Tide on a light ground. Inherits Tide Dark and redefines only its palette and roles, which is enough to carry every derived colour across. |
 | `midnight.s3theme` | A normal theme. Small palette, twenty roles, two overrides. What a theme actually looks like. |
 | `showcase.s3theme` | The reference. Every key the format has, in one working, lint-clean file - copy a section out of it rather than reading the specification. |
 
@@ -20,7 +22,7 @@ Three directories are searched, in this order, and a later one wins if two packs
 claim the same name:
 
 1. **Beside the application** - this directory. Packs that ship with it.
-2. **Beside your settings file** - your own packs. Settings → Editor → **Open
+2. **Beside your settings file** - your own packs. Settings → Theme → **Open
    folder** creates it and opens it for you.
    - macOS `~/Library/Application Support/sdl-shader-studio/themes/`
    - Windows `%APPDATA%/sdl-shader-studio/themes/`
@@ -39,8 +41,8 @@ can inherit from them.
 cp midnight.s3theme ~/Library/Application\ Support/sdl-shader-studio/themes/mine.s3theme
 ```
 
-Then in the app: Settings → Editor → **Reload themes**, and pick *Mine* from the
-Theme list.
+Then in the app: Settings → Theme → **Reload themes**, and pick the *Mine* card
+from the list of themes.
 
 A pack needs only a `[pack]` table to be valid. This is a complete theme:
 
@@ -166,7 +168,7 @@ never cost you the session.
 
 ## Iterating
 
-Turn on Settings → Editor → **Reload the theme when the window regains focus**.
+Turn on Settings → Theme → **Reload the theme when the window regains focus**.
 With your pack selected, save the file in a text editor and switch back to the
 app: the change is applied. It checks that one file's timestamp when the window
 regains focus and at no other time, so a pack you *add* - or a pack your theme

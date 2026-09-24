@@ -6,54 +6,102 @@
 #include <vector>
 
 #include <imgui.h>
+#include <imgui_internal.h>  // RenderArrow, for the target chip
 
 #include "app.h"
+#include "fonts.h"
 #include "panel_common.h"
 #include "bindings.h"
 #include "preview/renderer.h"
+#include "widgets.h"
 
 namespace ssstudio::gui {
 namespace {
 
-void draw_toolbar(App& app) {
+/// Play or Pause, with the glyph drawn in front of the word rather than typed:
+/// the built-in font has neither symbol, and a box where the pause bars should
+/// be is worse than no symbol at all.
+bool play_button(bool paused, const ThemeInk& ink) {
+    const char* label = paused ? "Play" : "Pause";
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float icon = std::round(ImGui::GetFontSize() * 0.62f);
+    const float gap = design_px(6.0f);
+    const ImVec2 size(style.FramePadding.x * 2.0f + icon + gap + text_width(label),
+                      ImGui::GetFrameHeight());
+    const bool pressed = ImGui::Button("##play_pause", size);
+    const ImVec2 min = ImGui::GetItemRectMin();
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+    const float top = min.y + (size.y - icon) * 0.5f;
+    const float left = min.x + style.FramePadding.x;
+    if (paused) {
+        draw_list->AddTriangleFilled(ImVec2(left + icon * 0.1f, top),
+                                     ImVec2(left + icon * 0.1f, top + icon),
+                                     ImVec2(left + icon * 0.95f, top + icon * 0.5f), ink.muted);
+    } else {
+        const float bar = std::max(1.0f, icon * 0.3f);
+        draw_list->AddRectFilled(ImVec2(left + icon * 0.1f, top),
+                                 ImVec2(left + icon * 0.1f + bar, top + icon), ink.muted, 1.0f);
+        draw_list->AddRectFilled(ImVec2(left + icon * 0.9f - bar, top),
+                                 ImVec2(left + icon * 0.9f, top + icon), ink.muted, 1.0f);
+    }
+    draw_list->AddText(ImVec2(left + icon + gap, min.y + style.FramePadding.y), ink.text, label);
+    return pressed;
+}
+
+/// The left half of the preview's one toolbar row: the clock. Play, restart,
+/// speed and the time it has reached.
+void draw_toolbar(App& app, FlowLayout& row, const ThemeInk& ink) {
     PreviewSettings& preview = app.project().preview;
 
-    // Both widths are settled before anything is placed: once the row starts,
-    // the available region only describes what is left of the current line.
-    const float speed_width = fitted_width(110.0f, 60.0f);
-    const float size_width = fitted_width(150.0f, 80.0f);
+    // Settled before anything is placed: once the row starts, the available
+    // region only describes what is left of the current line.
+    const float speed_width = std::min(fitted_width(64.0f, 50.0f), design_px(72.0f));
 
     // The whole toolbar folds onto as many rows as the panel's width needs. The
-    // play button is what someone reaches for first, so it leads and the size
-    // fields - the ones you set once - are what drop off the end.
-    FlowLayout row;
-
-    const char* play_label = preview.paused ? "Play" : "Pause";
-    row.next(button_width(play_label));
-    if (ImGui::Button(play_label)) preview.paused = !preview.paused;
+    // play button is what someone reaches for first, so it leads.
+    {
+        const char* label = preview.paused ? "Play" : "Pause";
+        row.next(button_width(label) + design_px(14.0f));
+        if (play_button(preview.paused, ink)) preview.paused = !preview.paused;
+    }
 
     row.next(button_width("Restart"));
     if (ImGui::Button("Restart")) app.reset_preview_time();
 
-    row.next(labeled_width("speed", speed_width));
+    row.next(design_px(9.0f));
+    toolbar_divider(ink);
+
+    row.next(labeled_width("Speed", speed_width));
     float speed = static_cast<float>(preview.speed);
-    if (ImGui::DragFloat(left_label("Speed", speed_width).c_str(), &speed, 0.01f, 0.0f, 8.0f)) {
-        preview.speed = speed;
+    ImGui::PushStyleColor(ImGuiCol_Text, ink.muted);
+    const std::string speed_id = left_label("Speed", speed_width);
+    ImGui::PopStyleColor();
+    bool speed_changed = false;
+    {
+        MonoScope mono(12.0f);
+        speed_changed = ImGui::DragFloat(speed_id.c_str(), &speed, 0.01f, 0.0f, 8.0f,
+                                         "%.2f\xC3\x97");
     }
+    if (speed_changed) preview.speed = speed;
 
     char clock[32];
-    std::snprintf(clock, sizeof(clock), "t = %.2fs", app.preview_time());
+    std::snprintf(clock, sizeof(clock), "t %.2f s", app.preview_time());
+    MonoScope mono(12.0f);
     row.next(text_width(clock));
-    // Same reason as the pipeline label below: bare text between framed widgets
-    // sits half a line high without this.
+    // Bare text between framed widgets sits half a line high without this.
     ImGui::AlignTextToFramePadding();
-    ImGui::TextDisabled("%s", clock);
+    colored_text(clock, ink.muted);
+}
+
+/// The end of the toolbar row: whether the image follows the panel's size, and
+/// the size it keeps when it does not.
+void draw_size_controls(App& app, const ThemeInk& ink) {
+    PreviewSettings& preview = app.project().preview;
 
     // The label only: the manifest key stays `follow_panel`, so renaming what it
     // is called does not silently reset the setting in every project that
     // already has one.
-    row.next(checkbox_width("Match panel size"));
-    ImGui::Checkbox("Match panel size", &preview.follow_panel);
+    ImGui::Checkbox("Fit panel", &preview.follow_panel);
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip(
             "Render at the panel's own size, so the image is one pixel per pixel.\n"
@@ -62,13 +110,27 @@ void draw_toolbar(App& app) {
     }
 
     if (!preview.follow_panel) {
-        row.next(labeled_width("size", size_width));
+        ImGui::SameLine();
+        const float size_width = design_px(130.0f);
         int size[2] = {preview.width, preview.height};
-        if (ImGui::DragInt2(left_label("Size", size_width).c_str(), size, 1.0f, 1, 8192)) {
+        ImGui::PushStyleColor(ImGuiCol_Text, ink.muted);
+        const std::string id = left_label("Size", size_width);
+        ImGui::PopStyleColor();
+        MonoScope mono(12.0f);
+        if (ImGui::DragInt2(id.c_str(), size, 1.0f, 1, 8192)) {
             preview.width = size[0];
             preview.height = size[1];
         }
     }
+}
+
+/// How wide draw_size_controls() will be.
+float size_controls_width(const PreviewSettings& preview) {
+    float width = checkbox_width("Fit panel");
+    if (!preview.follow_panel) {
+        width += ImGui::GetStyle().ItemSpacing.x + labeled_width("Size", design_px(130.0f));
+    }
+    return width;
 }
 
 /// The shaders of a stage a pipeline may name. All of them, not only the ones
@@ -99,7 +161,7 @@ bool refresh_choice(const Project& project, std::string& choice,
 /// setting it up. The shaders themselves are chosen in the pipeline editor - a
 /// pipeline is a saved thing, and editing it from the toolbar made every glance
 /// at the preview an opportunity to change the project by accident.
-void draw_pass_selector(App& app) {
+void draw_pass_selector(App& app, FlowLayout& row, const ThemeInk& ink) {
     PreviewRenderer* renderer = app.preview();
     if (!renderer) return;
     Project& project = app.project();
@@ -118,20 +180,32 @@ void draw_pass_selector(App& app) {
         project_changed |= refresh_choice(project, pipeline->fragment, fragments);
     }
 
-    const float combo_width = fitted_width(160.0f, 70.0f);
-    FlowLayout row;
+    const float combo_width = std::min(fitted_width(140.0f, 70.0f), design_px(140.0f));
+
+    // The pipeline half of the row goes against the right edge, as one group:
+    // it is about what is being drawn, where the left half is about the clock.
+    // When the row is too narrow to hold both, the group folds onto a row of
+    // its own rather than splitting.
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float group_width = text_width("Pipeline") + style.ItemSpacing.x + combo_width +
+                              style.ItemSpacing.x + button_width("Manage...") +
+                              style.ItemSpacing.x + design_px(9.0f) + style.ItemSpacing.x +
+                              size_controls_width(project.preview);
+    row.next(group_width);
+    if (ImGui::GetCursorPosX() + group_width < ImGui::GetContentRegionMax().x) {
+        ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - group_width);
+    }
 
     // Which pipeline is in use, named first: with the shader pickers moved into
     // the editor, the name is the only thing on this bar that says what the
     // image below it is.
-    row.next(text_width("Pipeline:"));
     // Plain text sits on the line's top edge while a framed widget sits one
     // padding in, so a label beside a combo reads as half a line too high
     // without this.
     ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted("Pipeline:");
+    colored_text("Pipeline", ink.muted);
 
-    row.next(combo_width);
+    ImGui::SameLine();
     ImGui::SetNextItemWidth(combo_width);
     // Disabled rather than absent when there are none: the row keeps its shape,
     // and an empty list that opens onto nothing would be the more confusing of
@@ -165,7 +239,7 @@ void draw_pass_selector(App& app) {
     // built-in one, which stops at Latin-1, so a gear glyph would come out as a
     // missing-character box. The trailing dots are this app's mark for a control
     // that opens something, as on "New shader..." and "Rename...".
-    row.next(button_width("Manage..."));
+    ImGui::SameLine();
     if (ImGui::Button("Manage...")) ImGui::OpenPopup("##pipeline_menu");
 
     if (ImGui::BeginPopup("##pipeline_menu")) {
@@ -223,6 +297,11 @@ void draw_pass_selector(App& app) {
         }
         ImGui::EndPopup();
     }
+
+    ImGui::SameLine();
+    toolbar_divider(ink);
+    ImGui::SameLine();
+    draw_size_controls(app, ink);
 
     // Re-read: a delete above may have moved the active pipeline.
     pipeline = project.active_pipeline();
@@ -539,38 +618,45 @@ void draw_preview_error(const std::string& message) {
     // it scrolls off the right edge and the panel shows the middle of a
     // sentence. Only the copy is broken up; the clipboard still gets the
     // original, which is what anybody pasting it into a search wants.
-    const float width = ImGui::GetContentRegionAvail().x;
-    const float glyph = std::max(1.0f, ImGui::CalcTextSize("M").x);
-    const std::size_t columns =
-        static_cast<std::size_t>(std::max(20.0f, (width - 16.0f) / glyph));
+    //
+    // In the code font, which is what makes the column count below mean
+    // something: every glyph is as wide as "M" there, and in the interface
+    // font almost none are.
+    {
+        MonoScope mono(12.0f);
+        const float width = ImGui::GetContentRegionAvail().x;
+        const float glyph = std::max(1.0f, ImGui::CalcTextSize("M").x);
+        const std::size_t columns =
+            static_cast<std::size_t>(std::max(20.0f, (width - 16.0f) / glyph));
 
-    std::string text;
-    std::size_t column = 0;
-    for (std::size_t i = 0; i < message.size(); ++i) {
-        if (message[i] == '\n') {
-            column = 0;
-        } else if (column >= columns) {
-            // Back up to the last space so a word is not split, unless the run
-            // is longer than the line - a path or a hash usually is.
-            const std::size_t space = text.find_last_of(' ');
-            const std::size_t line_start = text.find_last_of('\n');
-            if (space != std::string::npos &&
-                (line_start == std::string::npos || space > line_start + 1)) {
-                text[space] = '\n';
-                column = text.size() - space - 1;
-            } else {
-                text += '\n';
+        std::string text;
+        std::size_t column = 0;
+        for (std::size_t i = 0; i < message.size(); ++i) {
+            if (message[i] == '\n') {
                 column = 0;
+            } else if (column >= columns) {
+                // Back up to the last space so a word is not split, unless the run
+                // is longer than the line - a path or a hash usually is.
+                const std::size_t space = text.find_last_of(' ');
+                const std::size_t line_start = text.find_last_of('\n');
+                if (space != std::string::npos &&
+                    (line_start == std::string::npos || space > line_start + 1)) {
+                    text[space] = '\n';
+                    column = text.size() - space - 1;
+                } else {
+                    text += '\n';
+                    column = 0;
+                }
             }
+            text += message[i];
+            ++column;
         }
-        text += message[i];
-        ++column;
-    }
 
-    const int lines = static_cast<int>(std::count(text.begin(), text.end(), '\n')) + 1;
-    const float height = ImGui::GetTextLineHeight() * static_cast<float>(std::min(lines, 8) + 1);
-    ImGui::InputTextMultiline("##preview_error", text.data(), text.size() + 1,
-                              ImVec2(-FLT_MIN, height), ImGuiInputTextFlags_ReadOnly);
+        const int lines = static_cast<int>(std::count(text.begin(), text.end(), '\n')) + 1;
+        const float height = ImGui::GetTextLineHeight() * static_cast<float>(std::min(lines, 8) + 1);
+        ImGui::InputTextMultiline("##preview_error", text.data(), text.size() + 1,
+                                  ImVec2(-FLT_MIN, height), ImGuiInputTextFlags_ReadOnly);
+    }
 
     if (ImGui::SmallButton("Copy")) ImGui::SetClipboardText(message.c_str());
     ImGui::SameLine();
@@ -578,6 +664,7 @@ void draw_preview_error(const std::string& message) {
 }
 
 void draw_preview_panel(App& app) {
+    const ThemeInk ink(app.theme());
     PreviewRenderer* renderer = app.preview();
     const bool preview_usable = renderer != nullptr && renderer->ready() &&
                                 app.project_open() && app.preview_ready();
@@ -633,21 +720,68 @@ void draw_preview_panel(App& app) {
 
         ImGui::Spacing();
         ImGui::BeginDisabled(true);
-        draw_toolbar(app);
-        draw_pass_selector(app);
+        FlowLayout row;
+        draw_toolbar(app, row, ink);
+        draw_pass_selector(app, row, ink);
         ImGui::EndDisabled();
         return;
     }
 
-    draw_toolbar(app);
-    draw_pass_selector(app);
+    {
+        FlowLayout row;
+        draw_toolbar(app, row, ink);
+        draw_pass_selector(app, row, ink);
+    }
     ImGui::Separator();
 
+    // The image sits in from the panel's edges, the way the design frames it,
+    // so its border reads as the picture's edge rather than the panel's.
+    const float inset = design_px(6.0f);
+    ImGui::SetCursorPos(ImVec2(ImGui::GetCursorPosX() + inset, ImGui::GetCursorPosY() + inset));
+
+    // A pass in the chain that no longer compiles. The renderer goes on drawing
+    // the last blob that did, so the picture is still there - it is just not
+    // the code on screen any more, and has to say so.
+    const PreviewPipeline* active_pipeline = app.project().active_pipeline();
+    std::vector<const Document*> chain_documents;
+    if (active_pipeline != nullptr) {
+        if (const Document* doc = app.find_document(active_pipeline->vertex)) {
+            chain_documents.push_back(doc);
+        }
+        for (const PassDesc& pass : active_pipeline->passes) {
+            if (const Document* doc = app.find_document(pass.shader_id)) chain_documents.push_back(doc);
+        }
+        if (const Document* doc = app.find_document(active_pipeline->fragment)) {
+            chain_documents.push_back(doc);
+        }
+    }
+    const auto failed = [](const Document* doc) {
+        return !doc->compiled_ok && !doc->compiling && has_errors(doc->diagnostics);
+    };
+    const Document* failing = nullptr;
+    for (const Document* doc : chain_documents) {
+        if (failed(doc)) {
+            failing = doc;
+            break;
+        }
+    }
+    // Room for the per-pass list drawn under the image while a pass is broken:
+    // its caption and one frame-high row per pass, each followed by the item
+    // spacing ImGui leaves under it, plus the box's own margins.
+    const float spacing_y = ImGui::GetStyle().ItemSpacing.y;
+    const float list_height =
+        failing != nullptr
+            ? design_px(14.0f) + ImGui::GetTextLineHeight() + spacing_y +
+                  (ImGui::GetFrameHeight() + spacing_y) * static_cast<float>(chain_documents.size())
+            : 0.0f;
+
     PreviewSettings& settings = app.project().preview;
-    const ImVec2 available = ImGui::GetContentRegionAvail();
+    const ImVec2 room = ImGui::GetContentRegionAvail();
+    const ImVec2 available(std::max(1.0f, room.x - inset),
+                           std::max(1.0f, room.y - inset - list_height));
     if (settings.follow_panel) {
         settings.width = std::max(1, static_cast<int>(available.x));
-        settings.height = std::max(1, static_cast<int>(available.y - 24.0f));
+        settings.height = std::max(1, static_cast<int>(available.y));
     }
     renderer->resize(settings.width, settings.height);
 
@@ -670,30 +804,6 @@ void draw_preview_panel(App& app) {
     const std::map<std::string, PassFeed> feeds = evaluate_pass_feeds(app, schedule);
     const bool rendered = renderer->render(schedule, feeds, settings);
 
-    // Which target is on screen. Only worth offering once there is more than
-    // one, and it is what turns "the chain is wrong somewhere" into "the chain
-    // is wrong here".
-    if (rendered && schedule.targets.size() > 1) {
-        const auto labels = renderer->target_labels();
-        const auto describe = [&](std::size_t index) {
-            if (index >= labels.size()) return std::string("(none)");
-            const auto& label = labels[index];
-            if (label.owner_pass.empty()) return std::string("Image");
-            std::string text = label.owner_pass;
-            if (label.copy != 0) text += " (previous)";
-            return text + "  " + std::string(to_string(label.format));
-        };
-        ImGui::SetNextItemWidth(220.0f);
-        if (ImGui::BeginCombo("Showing", describe(renderer->inspected_target()).c_str())) {
-            for (std::size_t i = 0; i < labels.size(); ++i) {
-                if (ImGui::Selectable(describe(i).c_str(), renderer->inspected_target() == i)) {
-                    renderer->set_inspected_target(static_cast<std::uint32_t>(i));
-                }
-            }
-            ImGui::EndCombo();
-        }
-    }
-
     if (!rendered) {
         app.report_preview_status(renderer->status());
         draw_preview_error(renderer->status());
@@ -714,8 +824,8 @@ void draw_preview_panel(App& app) {
         static_cast<float>(renderer->width()) / static_cast<float>(std::max(1, renderer->height()));
     float draw_width = available.x;
     float draw_height = draw_width / target_aspect;
-    if (draw_height > available.y - 24.0f) {
-        draw_height = available.y - 24.0f;
+    if (draw_height > available.y) {
+        draw_height = available.y;
         draw_width = draw_height * target_aspect;
     }
 
@@ -744,14 +854,95 @@ void draw_preview_panel(App& app) {
         draw_list->PopClipRect();
     }
 
-    ImGui::Image(static_cast<ImTextureID>(reinterpret_cast<std::uintptr_t>(texture)),
-                 ImVec2(draw_width, draw_height));
+    // The last good frame, when the code on screen no longer compiles: drawn at
+    // a little over half strength so it cannot be mistaken for the current one.
+    const ImTextureRef image(static_cast<ImTextureID>(reinterpret_cast<std::uintptr_t>(texture)));
+    if (failing != nullptr) {
+        ImGui::ImageWithBg(image, ImVec2(draw_width, draw_height), ImVec2(0, 0), ImVec2(1, 1),
+                           ImVec4(0, 0, 0, 0), ImVec4(1, 1, 1, 0.55f));
+    } else {
+        ImGui::Image(image, ImVec2(draw_width, draw_height));
+    }
+    const bool image_hovered = ImGui::IsItemHovered();
     // Drawn after the image so the edge of the output is visible against a
-    // window of a similar colour.
-    draw_list->AddRect(image_pos, image_end, theme_u32(theme.preview_color("border")));
+    // window of a similar colour - and in the warning ink while it is stale.
+    const float rounding = ImGui::GetStyle().ImageRounding;
+    draw_list->AddRect(image_pos, image_end,
+                       failing != nullptr ? with_alpha(ink.warn, 0.5f)
+                                          : theme_u32(theme.preview_color("border")),
+                       rounding);
     // The one place an output actually reaches the screen, and so the one place
     // that can say the shader clock has a frame to account for.
     app.note_preview_presented();
+
+    // What sits on the picture: the stale-frame warning, which target is
+    // showing, and the numbers. Laid out first, so the pointer can be kept off
+    // the shader while it is over one of them.
+    const float margin = design_px(10.0f);
+    const float chip_height = ImGui::GetFrameHeight();
+    const float chip_pad = design_px(10.0f);
+    const float chip_gap = design_px(8.0f);
+    float next_chip_y = image_pos.y + margin;
+    std::vector<std::pair<ImVec2, ImVec2>> chips;
+
+    std::string stale;
+    ImVec2 stale_min, stale_max;
+    if (failing != nullptr) {
+        stale = std::string("Last good frame \xC2\xB7 ") + shader_display_name(failing->path, failing->id) +
+                "." + stage_suffix(failing->stage) + " failed";
+        FontScope small(nullptr, 12.0f);
+        stale_min = ImVec2(image_pos.x + margin, next_chip_y);
+        stale_max = ImVec2(stale_min.x + chip_pad * 2.0f + design_px(6.0f) + chip_gap +
+                               text_width(stale.c_str()),
+                           stale_min.y + chip_height);
+        chips.emplace_back(stale_min, stale_max);
+        next_chip_y = stale_max.y + design_px(6.0f);
+    }
+
+    // Which target is on screen. Only worth offering once there is more than
+    // one, and it is what turns "the chain is wrong somewhere" into "the chain
+    // is wrong here".
+    const auto labels = renderer->target_labels();
+    const auto describe = [&](std::size_t index) {
+        if (index >= labels.size()) return std::string("(none)");
+        const auto& label = labels[index];
+        if (label.owner_pass.empty()) return std::string("Image");
+        std::string text = label.owner_pass;
+        if (label.copy != 0) text += " (previous)";
+        return text + "  " + std::string(to_string(label.format));
+    };
+    const bool offer_targets = schedule.targets.size() > 1;
+    const std::string target_text = describe(renderer->inspected_target());
+    ImVec2 target_min, target_max;
+    if (offer_targets) {
+        const float arrow = ImGui::GetFontSize() * 0.6f;
+        target_min = ImVec2(image_pos.x + margin, next_chip_y);
+        target_max = ImVec2(target_min.x + chip_pad * 2.0f + text_width("Target") + chip_gap +
+                                text_width(target_text.c_str()) + chip_gap + arrow,
+                            target_min.y + chip_height);
+        chips.emplace_back(target_min, target_max);
+    }
+
+    std::string stats;
+    ImVec2 stats_min, stats_max;
+    if (app.settings().preview.show_stats) {
+        char text[256];
+        std::snprintf(text, sizeof(text), "%d\xC3\x97%d   %.0f fps   %s", renderer->width(),
+                      renderer->height(), ImGui::GetIO().Framerate, renderer->status().c_str());
+        stats = text;
+        MonoScope mono(11.0f);
+        const float width = text_width(stats.c_str()) + chip_pad * 2.0f;
+        stats_max = ImVec2(image_end.x - margin, image_pos.y + margin + chip_height);
+        stats_min = ImVec2(stats_max.x - width, image_pos.y + margin);
+        chips.emplace_back(stats_min, stats_max);
+    }
+
+    const ImVec2 pointer = ImGui::GetMousePos();
+    const bool over_chip = std::any_of(chips.begin(), chips.end(), [&](const auto& chip) {
+        return pointer.x >= chip.first.x && pointer.x < chip.second.x &&
+               pointer.y >= chip.first.y && pointer.y < chip.second.y;
+    });
+    const bool picture_hovered = image_hovered && !over_chip;
 
     // Pointer state for shaders that take a mouse uniform. Derived from the
     // rectangle the image was just drawn into and flipped to the bottom-left
@@ -763,7 +954,7 @@ void draw_preview_panel(App& app) {
     // image needs the texture it produces.
     if (draw_width > 0.0f && draw_height > 0.0f) {
         PreviewMouse mouse = app.preview_mouse();
-        const bool hovered = ImGui::IsItemHovered();
+        const bool hovered = picture_hovered;
         mouse.pressed = hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left);
         mouse.down = hovered && ImGui::IsMouseDown(ImGuiMouseButton_Left);
         if (mouse.down || mouse.pressed) {
@@ -781,7 +972,7 @@ void draw_preview_panel(App& app) {
     }
 
     // Pixel inspector: hover to read the rendered value back off the GPU.
-    if (app.settings().preview.pixel_inspector && ImGui::IsItemHovered()) {
+    if (app.settings().preview.pixel_inspector && picture_hovered) {
         const ImVec2 mouse = ImGui::GetMousePos();
         const int x = static_cast<int>((mouse.x - image_pos.x) / draw_width * renderer->width());
         const int y = static_cast<int>((mouse.y - image_pos.y) / draw_height * renderer->height());
@@ -798,10 +989,103 @@ void draw_preview_panel(App& app) {
         }
     }
 
-    if (app.settings().preview.show_stats) {
-        ImGui::TextColored(theme_vec4(app.theme().preview_color("stats_ink")),
-                           "%dx%d  |  %.1f fps  |  %s", renderer->width(), renderer->height(),
-                           ImGui::GetIO().Framerate, renderer->status().c_str());
+    // --- the chips themselves -------------------------------------------
+    if (failing != nullptr) {
+        FontScope small(nullptr, 12.0f);
+        overlay_frame(draw_list, stale_min, stale_max, ink, with_alpha(ink.warn, 0.5f));
+        const float center_y = (stale_min.y + stale_max.y) * 0.5f;
+        const float dot = design_px(6.0f);
+        draw_list->AddCircleFilled(ImVec2(stale_min.x + chip_pad + dot * 0.5f, center_y), dot * 0.5f,
+                                   ink.warn);
+        draw_list->AddText(ImVec2(stale_min.x + chip_pad + dot + chip_gap,
+                                  center_y - ImGui::GetTextLineHeight() * 0.5f),
+                           ink.warn, stale.c_str());
+    }
+
+    if (offer_targets) {
+        const ImVec2 after_image = ImGui::GetCursorScreenPos();
+        ImGui::SetCursorScreenPos(target_min);
+        if (ImGui::InvisibleButton("##target_chip",
+                                   ImVec2(target_max.x - target_min.x, target_max.y - target_min.y))) {
+            ImGui::OpenPopup("##target_menu");
+        }
+        const bool hovered = ImGui::IsItemHovered();
+        ImGui::SetItemTooltip("Which target of the chain is on screen");
+        overlay_frame(draw_list, target_min, target_max, ink, hovered ? ink.strong : 0);
+        const float text_y = (target_min.y + target_max.y - ImGui::GetTextLineHeight()) * 0.5f;
+        float x = target_min.x + chip_pad;
+        draw_list->AddText(ImVec2(x, text_y), ink.muted, "Target");
+        x += text_width("Target") + chip_gap;
+        draw_list->AddText(ImVec2(x, text_y), ink.text, target_text.c_str());
+        x += text_width(target_text.c_str()) + chip_gap;
+        const float arrow = ImGui::GetFontSize() * 0.6f;
+        ImGui::RenderArrow(draw_list,
+                           ImVec2(x, (target_min.y + target_max.y - arrow) * 0.5f), ink.muted,
+                           ImGuiDir_Down, 0.6f);
+        ImGui::SetNextWindowPos(ImVec2(target_min.x, target_max.y + design_px(4.0f)));
+        if (ImGui::BeginPopup("##target_menu")) {
+            for (std::size_t i = 0; i < labels.size(); ++i) {
+                if (ImGui::Selectable(describe(i).c_str(), renderer->inspected_target() == i)) {
+                    renderer->set_inspected_target(static_cast<std::uint32_t>(i));
+                }
+            }
+            ImGui::EndPopup();
+        }
+        // Back to where the image left the layout, and an empty item there so
+        // the window's extent is set by something that was submitted rather
+        // than by a bare cursor move.
+        ImGui::SetCursorScreenPos(after_image);
+        ImGui::Dummy(ImVec2(0.0f, 0.0f));
+    }
+
+    if (!stats.empty()) {
+        MonoScope mono(11.0f);
+        overlay_frame(draw_list, stats_min, stats_max, ink);
+        draw_list->AddText(ImVec2(stats_min.x + chip_pad,
+                                  (stats_min.y + stats_max.y - ImGui::GetTextLineHeight()) * 0.5f),
+                           theme_u32(theme.preview_color("stats_ink")), stats.c_str());
+    }
+
+    // --- the chain, pass by pass, while one of its passes is broken -------
+    if (failing != nullptr) {
+        ImGui::Dummy(ImVec2(0.0f, design_px(4.0f)));
+        // The box's size is only known once its rows are laid out, so the rows
+        // go on the upper channel and the box is filled in beneath them after.
+        draw_list->ChannelsSplit(2);
+        draw_list->ChannelsSetCurrent(1);
+        const ImVec2 box_min = ImGui::GetCursorScreenPos();
+        const float box_width = std::max(1.0f, available.x);
+        ImGui::Indent(design_px(12.0f));
+        ImGui::Dummy(ImVec2(0.0f, design_px(2.0f)));
+        caps_label("Pipeline", ink);
+        bool blocked = false;
+        int index = 0;
+        for (const Document* doc : chain_documents) {
+            ++index;
+            const bool broken = failed(doc);
+            const ImU32 color = broken ? ink.error : (blocked ? ink.strong : ink.ok);
+            const char* state = broken ? "error" : (blocked ? "waiting" : "ok");
+            ImGui::AlignTextToFramePadding();
+            status_dot(color);
+            ImGui::SameLine(0.0f, design_px(8.0f));
+            MonoScope mono(12.0f);
+            const std::string name = std::to_string(index) + " " +
+                                     shader_display_name(doc->path, doc->id) + "." +
+                                     stage_suffix(doc->stage);
+            colored_text(name, blocked && !broken ? ink.muted : ink.text);
+            same_line_right_aligned(text_width(state) + design_px(12.0f));
+            colored_text(state, broken ? ink.error : ink.muted);
+            // Everything after a broken pass reads what it would have written,
+            // so it is waiting on it rather than working.
+            blocked = blocked || broken;
+        }
+        ImGui::Unindent(design_px(12.0f));
+        const ImVec2 box_max(box_min.x + box_width, ImGui::GetCursorScreenPos().y + design_px(2.0f));
+        draw_list->ChannelsSetCurrent(0);
+        draw_list->AddRectFilled(box_min, box_max, ImGui::GetColorU32(ImGuiCol_Header),
+                                 design_px(6.0f));
+        draw_list->AddRect(box_min, box_max, ink.subtle, design_px(6.0f));
+        draw_list->ChannelsMerge();
     }
 
 }

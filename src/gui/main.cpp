@@ -130,6 +130,10 @@ int main(int argc, char** argv) {
         const float delta = std::chrono::duration<float>(now - previous).count();
         previous = now;
 
+        // Fonts are swapped here, outside any frame, when a theme change
+        // during the last one asked for different ones.
+        app.before_frame();
+
         ImGui_ImplSDLGPU3_NewFrame();
         ImGui_ImplSDL3_NewFrame();
         ImGui::NewFrame();

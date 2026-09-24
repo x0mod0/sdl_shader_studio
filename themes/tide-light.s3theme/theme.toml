@@ -1,0 +1,83 @@
+# Tide on a cool paper ground. Inherits Tide Dark's [colors], [style], [graph]
+# and [font]: every expression there is written against roles, so redefining
+# the roles below is enough to carry the whole look across.
+# See docs/THEME_PACK_FORMAT.md.
+
+[pack]
+format = 1
+name = "Tide Light"
+author = "SDL Shader Studio"
+version = "1.0.0"
+inherit = "tide-dark"
+appearance = "light"
+description = "Tide on a cool paper ground. White fields, deeper teal for contrast."
+
+[palette]
+paper  = "#eceff0"
+card   = "#f7f8f8"
+white  = "#ffffff"
+rule   = "#d5dbdb"
+edge   = "#bcc4c4"
+ink    = "#172022"
+slate  = "#5b676b"
+tide   = "#0e8f76"
+moss   = "#2e8540"
+amber  = "#9a6300"
+coral  = "#c93a36"
+sky    = "#2f6fb3"
+
+[roles]
+"surface.base"    = "$palette.paper"
+"surface.raised"  = "$palette.card"
+"surface.sunken"  = "$palette.white"
+"surface.overlay" = "alpha($palette.paper, 70%)"
+"ink.primary"     = "$palette.ink"
+"ink.muted"       = "$palette.slate"
+"ink.inverted"    = "$palette.white"
+"line.subtle"     = "$palette.rule"
+"line.strong"     = "$palette.edge"
+accent            = "$palette.tide"
+"accent.hover"    = "lighten($accent, 5%)"
+"accent.active"   = "darken($accent, 6%)"
+"accent.muted"    = "alpha($accent, 14%)"
+"accent.ink"      = "$accent"
+"select.bg"       = "alpha($accent, 22%)"
+"select.ink"      = "$ink.primary"
+"status.ok"       = "$palette.moss"
+"status.warn"     = "$palette.amber"
+"status.error"    = "$palette.coral"
+"status.info"     = "$palette.sky"
+
+[colors]
+# Light buttons sit slightly below the card instead of above it.
+Button            = "darken($surface.raised, 4%)"
+ButtonHovered     = "darken($surface.raised, 7%)"
+ButtonActive      = "darken($surface.raised, 10%)"
+FrameBgHovered    = "darken($surface.sunken, 2%)"
+FrameBgActive     = "darken($surface.sunken, 4%)"
+TitleBg           = "darken($surface.base, 2%)"
+TitleBgActive     = "darken($surface.base, 2%)"
+
+[syntax]
+plain        = "$palette.ink"
+comment      = "#6b777b"
+preprocessor = "#8a5a00"
+keyword      = "#2b5fb0"
+type         = "#0b7a65"
+intrinsic    = "#9a3f8c"
+number       = "#b4531a"
+string       = "#4f7a12"
+operator     = "#4a5558"
+identifier   = "$palette.ink"
+
+[graph]
+canvas = "darken($surface.base, 2%)"
+grid = "alpha($ink.primary, 10%)"
+node_bg = "$surface.raised"
+node_border = "$line.subtle"
+pin_unconnected = "$line.strong"
+
+[preview]
+checker_a = "#e6eaea"
+checker_b = "#d9dede"
+stats_ink = "#3d484b"

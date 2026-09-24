@@ -1,0 +1,155 @@
+# Tide: the application's own look. Cool neutral panels floating on a darker
+# gutter, a mint accent kept for the one primary action, and neutral buttons
+# everywhere else. A directory pack so that [font] has somewhere to point.
+# See docs/THEME_PACK_FORMAT.md.
+
+[pack]
+format = 1
+name = "Tide Dark"
+author = "SDL Shader Studio"
+version = "1.0.0"
+inherit = "dark"
+appearance = "dark"
+description = "Cool neutral panels on a darker gutter, mint accent, neutral buttons."
+
+[palette]
+void   = "#101214"
+slate  = "#171a1d"
+deep   = "#0c0e10"
+rule   = "#24292d"
+edge   = "#343b40"
+mist   = "#dde3e5"
+fog    = "#8b969b"
+tide   = "#52d1b2"
+abyss  = "#062219"
+moss   = "#8fd694"
+amber  = "#e5b567"
+coral  = "#ef7470"
+sky    = "#74b4ee"
+
+[roles]
+"surface.base"    = "$palette.void"
+"surface.raised"  = "$palette.slate"
+"surface.sunken"  = "$palette.deep"
+"surface.overlay" = "alpha($palette.void, 70%)"
+"ink.primary"     = "$palette.mist"
+"ink.muted"       = "$palette.fog"
+"ink.inverted"    = "$palette.abyss"
+"line.subtle"     = "$palette.rule"
+"line.strong"     = "$palette.edge"
+accent            = "$palette.tide"
+"accent.hover"    = "lighten($accent, 6%)"
+"accent.active"   = "darken($accent, 6%)"
+"accent.muted"    = "alpha($accent, 16%)"
+"accent.ink"      = "$accent"
+"select.bg"       = "alpha($accent, 28%)"
+"select.ink"      = "$ink.primary"
+"status.ok"       = "$palette.moss"
+"status.warn"     = "$palette.amber"
+"status.error"    = "$palette.coral"
+"status.info"     = "$palette.sky"
+
+[colors]
+# Panels are raised; the dock host paints surface.base between them, which is
+# what makes the 4px gutter read as space rather than as a line.
+WindowBg          = "$surface.raised"
+ChildBg           = "alpha($surface.raised, 0%)"
+MenuBarBg         = "$surface.base"
+TitleBg           = "mix($surface.base, $surface.raised, 40%)"
+TitleBgActive     = "mix($surface.base, $surface.raised, 40%)"
+# Neutral buttons: only the primary action (Build) is filled with the accent.
+Button            = "lighten($surface.raised, 5%)"
+ButtonHovered     = "lighten($surface.raised, 9%)"
+ButtonActive      = "lighten($surface.raised, 12%)"
+Header            = "alpha($ink.primary, 5%)"
+HeaderHovered     = "alpha($ink.primary, 8%)"
+HeaderActive      = "$accent.muted"
+CheckMark         = "$ink.inverted"
+Tab               = "alpha($surface.raised, 0%)"
+TabHovered        = "alpha($ink.primary, 6%)"
+TabSelected       = "$surface.raised"
+TabSelectedOverline = "$accent"
+TabDimmed         = "alpha($surface.raised, 0%)"
+TabDimmedSelected = "$surface.raised"
+TabDimmedSelectedOverline = "$line.strong"
+FrameBgHovered    = "lighten($surface.sunken, 3%)"
+FrameBgActive     = "lighten($surface.sunken, 5%)"
+TableHeaderBg     = "alpha($surface.raised, 0%)"
+TableRowBgAlt     = "alpha($ink.primary, 2%)"
+ScrollbarBg       = "alpha($surface.sunken, 0%)"
+ScrollbarGrab     = "alpha($ink.primary, 14%)"
+ScrollbarGrabHovered = "alpha($ink.primary, 22%)"
+Separator         = "$line.subtle"
+
+[style]
+window_padding = [12, 10]
+window_rounding = 8.0
+child_rounding = 6.0
+child_border_size = 0.0
+popup_rounding = 8.0
+frame_padding = [9, 5]
+frame_rounding = 5.0
+frame_border_size = 1.0
+item_spacing = [8, 8]
+item_inner_spacing = [6, 4]
+cell_padding = [8, 6]
+indent_spacing = 16.0
+scrollbar_size = 10.0
+scrollbar_rounding = 5.0
+grab_min_size = 10.0
+grab_rounding = 5.0
+image_rounding = 4.0
+tab_rounding = 6.0
+tab_border_size = 0.0
+tab_bar_border_size = 1.0
+tab_bar_overline_size = 2.0
+menu_item_rounding = 5.0
+separator_text_border_size = 1.0
+
+[syntax]
+plain        = "$palette.mist"
+comment      = "#76828a"
+preprocessor = "$palette.amber"
+keyword      = "#86b7f2"
+type         = "$palette.tide"
+intrinsic    = "#e0a3d6"
+number       = "#f0a86a"
+string       = "#c8d98a"
+operator     = "#a3adb2"
+identifier   = "$palette.mist"
+
+[graph]
+canvas = "darken($surface.base, 1%)"
+grid = "alpha($ink.primary, 9%)"
+node_bg = "#1b1f23"
+node_border = "#2c3237"
+node_border_selected = "$accent"
+node_title = "$ink.primary"
+wire = "$line.strong"
+wire_active = "$accent"
+pin_unconnected = "#4a5258"
+
+[graph.nodes]
+input = "#5b8fd0"
+math = "#8b9bb8"
+utility = "#5fb58a"
+color = "#d07a9a"
+control = "#c9a24f"
+custom = "#9a7bd0"
+output = "#d58a5e"
+
+[preview]
+checker_a = "#1d2124"
+checker_b = "#15181a"
+checker_size = 8.0
+border = "$line.subtle"
+stats_ink = "#a3adb2"
+
+# IBM Plex Sans and JetBrains Mono, both under the SIL Open Font License, with
+# their licences beside them in fonts/ (see the README there). A missing file
+# falls back to the built-in font.
+[font]
+ui = "fonts/IBMPlexSans-Regular.ttf"
+editor = "fonts/JetBrainsMono-Regular.ttf"
+ui_size = 16.0
+editor_size = 16.0

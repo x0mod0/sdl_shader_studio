@@ -95,11 +95,14 @@ See [`docs/PACK_FORMAT.md`](docs/PACK_FORMAT.md) for the byte-level specificatio
 
 ## Theming
 
-Choose one of three built-in interface themes and three syntax palettes, or
-change individual syntax colours. For anything more, write a **theme pack**: a
-small TOML file that sets twenty semantic colour roles, from which all
-sixty-three widget colours are derived. `ssstudio theme` checks a pack for
-problems, including readability, before you use it.
+The app opens in **Tide Dark**, one of two theme packs it ships with, set in
+IBM Plex Sans and JetBrains Mono (both under the SIL Open Font License; the
+licences are in `themes/tide-dark.s3theme/fonts/`). Choose it, Tide Light or one
+of three built-in interface themes, pick one of three syntax palettes, or change
+individual syntax colours. For anything more, write a **theme pack**: a small
+TOML file that sets twenty semantic colour roles, from which all sixty-three
+widget colours are derived. `ssstudio theme` checks a pack for problems,
+including readability, before you use it.
 
 **Guide:** [Theming](https://github.com/x0mod0/sdl_shader_studio/blob/develop/docs/readme/THEMING.md) - from picking a theme to writing,
 checking and sharing your own pack.

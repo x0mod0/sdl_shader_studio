@@ -1,5 +1,6 @@
 // Visual styling. Kept apart from panel code so a theme change never touches
 // behaviour.
+#include <algorithm>
 #include <array>
 #include <string>
 #include <unordered_map>
@@ -52,6 +53,11 @@ void apply_default_metrics(ImGuiStyle& style) {
     style.ItemSpacing = ImVec2(8, 6);
     style.WindowMenuButtonPosition = ImGuiDir_None;
     style.SeparatorTextBorderSize = 1.0f;
+    // Panels sit on a gutter the dock host paints in surface.base (see
+    // App::draw_dockspace). Four pixels is what makes it read as space between
+    // cards rather than as a line drawn between them; it is also a wider,
+    // easier target for dragging a split.
+    style.DockingSeparatorSize = 4.0f;
 }
 
 /// The dark theme's own colours, which are ImGui's dark style with the handful
@@ -78,7 +84,11 @@ void apply_builtin_dark(ImGuiStyle& style) {
 void apply_pack_colors(ImGuiStyle& style, const ResolvedTheme& theme) {
     ImGui::StyleColorsDark();
     for (const auto& [name, color] : theme.ui) {
-        const int index = imgui_color_index("ImGuiCol_" + name);
+        // By the bare name: GetStyleColorName() spells ImGuiCol_Text as "Text",
+        // which is also how a pack spells it. Looking the name up with the
+        // prefix put back matched nothing, and every pack's widget colours
+        // were silently dropped.
+        const int index = imgui_color_index(name);
         if (index >= 0) style.Colors[index] = theme_vec4(color);
     }
 }
@@ -141,7 +151,7 @@ void apply_pack_metrics(ImGuiStyle& style, const ThemeStyle& metrics) {
 // ---------------------------------------------------------------------------
 // Theme
 // ---------------------------------------------------------------------------
-void apply_theme(const ResolvedTheme& theme, float ui_scale) {
+void apply_theme(const ResolvedTheme& theme, float ui_scale, float ui_font_size) {
     ImGuiStyle& style = ImGui::GetStyle();
     // Back to ImGui's defaults first. ScaleAllSizes() below multiplies whatever
     // is already there, so re-applying a theme without this would compound the
@@ -166,6 +176,13 @@ void apply_theme(const ResolvedTheme& theme, float ui_scale) {
 
     apply_default_metrics(style);
     if (!theme.builtin) apply_pack_metrics(style, theme.style);
+
+    // The interface's text size: the user's own when they have chosen one, the
+    // pack's suggestion when they have not - a suggestion only, which is why it
+    // loses - and the app's default when there is neither. ui_scale below still
+    // multiplies it. Always set, rather than left for ImGui to take from the
+    // font, so every theme starts from the same size whatever font it uses.
+    style.FontSizeBase = ui_font_size_in_effect(ui_font_size, theme.font_ui_size);
 
     // A dock node draws its own close button at the right of the tab bar, on top
     // of the close button each tab already has. Two buttons a few pixels apart

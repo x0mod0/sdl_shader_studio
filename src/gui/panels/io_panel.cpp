@@ -21,6 +21,7 @@
 #include "panel_common.h"
 #include "bindings.h"
 #include "preview/renderer.h"
+#include "widgets.h"
 
 namespace ssstudio::gui {
 namespace {
@@ -419,21 +420,36 @@ bool sampler_state_editor(Binding& binding) {
     return changed;
 }
 
-bool binding_row(App& app, const std::string& shader_id, const char* group,
-                 const std::string& key, const UniformMember* member, Binding& binding,
-                 const Resource* resource = nullptr) {
+/// One binding as a table row: what it is called, what type it is, where its
+/// value comes from, the value itself, and whether it is locked.
+///
+/// `type` is the first line of the second column; `detail` goes under it, in
+/// smaller type - the registers and what the binding resolved to. On a second
+/// line rather than after the type, so the column stays narrow and the words
+/// never wrap mid-register.
+bool binding_row(App& app, const std::string& shader_id, const std::string& type,
+                 const std::string& detail, const std::string& key, const UniformMember* member,
+                 Binding& binding, const ThemeInk& ink, const Resource* resource = nullptr) {
     bool changed = false;
     ImGui::PushID(key.c_str());
     ImGui::TableNextRow();
 
     ImGui::TableNextColumn();
-    ImGui::TextUnformatted(key.c_str());
+    ImGui::AlignTextToFramePadding();
+    mono_text(key, ink.text, 12.0f);
+    if (ImGui::IsItemHovered() && ImGui::GetItemRectSize().x >= ImGui::GetContentRegionAvail().x) {
+        // Clipped by a narrow column; the whole name is one hover away.
+        ImGui::SetTooltip("%s", key.c_str());
+    }
 
     ImGui::TableNextColumn();
-    if (member) {
-        ImGui::TextDisabled("%s", member->c_type().c_str());
-    } else {
-        ImGui::TextDisabled("%s", group);
+    {
+        MonoScope mono(11.5f);
+        colored_text(type, ink.soft);
+    }
+    if (!detail.empty()) {
+        MonoScope mono(10.5f);
+        colored_text(detail, ink.muted);
     }
 
     ImGui::TableNextColumn();
@@ -507,14 +523,31 @@ bool binding_row(App& app, const std::string& shader_id, const char* group,
 
             char buffer[96];
             std::snprintf(buffer, sizeof(buffer), "%s", binding.text.c_str());
-            if (ImGui::InputTextWithHint("##macro", "time, resolution, mouse, ...", buffer,
-                                         sizeof(buffer))) {
+            bool edited = false;
+            {
+                // A macro name is something typed into a shader, so it is set
+                // in the code font like the shader is.
+                MonoScope mono(12.0f);
+                edited = ImGui::InputTextWithHint("##macro", "time, resolution, mouse, ...", buffer,
+                                                  sizeof(buffer));
+            }
+            if (edited) {
                 binding.text = buffer;
                 changed = true;
             }
 
             ImGui::SameLine(0.0f, gap);
-            if (ImGui::Button("i", ImVec2(info, 0.0f))) {
+            // A round outlined "i": a way to read more, not an action, so it
+            // is drawn quieter than the fields beside it.
+            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, info * 0.5f);
+            ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
+            ImGui::PushStyleColor(ImGuiCol_Button, with_alpha(ink.raised, 0.0f));
+            ImGui::PushStyleColor(ImGuiCol_Border, ink.strong);
+            ImGui::PushStyleColor(ImGuiCol_Text, ink.muted);
+            const bool help = ImGui::Button("i", ImVec2(info, 0.0f));
+            ImGui::PopStyleColor(3);
+            ImGui::PopStyleVar(2);
+            if (help) {
                 cheatsheet_page() = 0;
                 ImGui::OpenPopup("##macro_help");
             }
@@ -644,10 +677,28 @@ bool binding_row(App& app, const std::string& shader_id, const char* group,
             break;
     }
 
+    // A ghost toggle: nothing but the word while unlocked, and the accent's
+    // tint while locked, so a locked row is findable down a long table.
     ImGui::TableNextColumn();
-    if (ImGui::SmallButton(binding.locked ? "locked" : "lock")) {
-        binding.locked = !binding.locked;
-        changed = true;
+    {
+        const char* label = binding.locked ? "locked" : "lock";
+        FontScope small(nullptr, 11.5f);
+        const float width = button_width(label);
+        ImGui::SetCursorPosX(ImGui::GetCursorPosX() +
+                             std::max(0.0f, ImGui::GetContentRegionAvail().x - width));
+        ImGui::AlignTextToFramePadding();
+        const ImU32 fill = binding.locked ? ink.accent_muted : with_alpha(ink.raised, 0.0f);
+        ImGui::PushStyleColor(ImGuiCol_Button, fill);
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
+                              binding.locked ? with_alpha(ink.accent, 0.24f)
+                                             : ImGui::GetColorU32(ImGuiCol_HeaderHovered));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, with_alpha(ink.accent, 0.3f));
+        ImGui::PushStyleColor(ImGuiCol_Text, binding.locked ? ink.accent_ink : ink.muted);
+        if (ImGui::SmallButton(label)) {
+            binding.locked = !binding.locked;
+            changed = true;
+        }
+        ImGui::PopStyleColor(4);
     }
 
     ImGui::PopID();
@@ -961,48 +1012,102 @@ void draw_io_panel(App& app) {
     ShaderBindings& bindings = app.project().bindings[doc->id];
     const Reflection& reflection = doc->reflection;
     bool changed = false;
+    const ThemeInk ink(app.theme());
 
     const bool show_registers = app.settings().ui.show_register_hints;
 
+    // What is being bound, and how much of it: the shader by the name its file
+    // has, and the count of rows below.
+    {
+        std::size_t rows = 0;
+        for (const auto& block : reflection.uniform_blocks) rows += block.members.size();
+        for (const auto& resource : reflection.resources) {
+            rows += resource.kind == ResourceKind::SampledTexture ? resource_slot_count(resource) : 1u;
+        }
+        const std::string name =
+            shader_display_name(doc->path, doc->id) + "." + stage_suffix(doc->stage);
+        mono_text(name, ink.text, 12.0f);
+        ImGui::SameLine(0.0f, design_px(10.0f));
+        FontScope small(nullptr, 12.0f);
+        colored_text("from reflection \xC2\xB7 " + std::to_string(rows) +
+                         (rows == 1 ? " binding" : " bindings"),
+                     ink.muted);
+    }
+    ImGui::Dummy(ImVec2(0.0f, design_px(2.0f)));
+
+    // The five columns every binding table shares. Separated by hairlines
+    // rather than striped, so a row with a two-line type does not read as two.
+    const auto begin_bindings_table = [&](const char* id, const char* second_column) {
+        ImGui::PushStyleColor(ImGuiCol_TableBorderLight, ink.subtle);
+        const bool open = ImGui::BeginTable(
+            id, 5, ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_BordersInnerH,
+            ImVec2(section_content_width(), 0.0f));
+        ImGui::PopStyleColor();
+        if (!open) return false;
+        ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch, 0.28f);
+        ImGui::TableSetupColumn(second_column, ImGuiTableColumnFlags_WidthStretch, 0.18f);
+        ImGui::TableSetupColumn("Source", ImGuiTableColumnFlags_WidthStretch, 0.2f);
+        ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch, 0.26f);
+        ImGui::TableSetupColumn("##lock", ImGuiTableColumnFlags_WidthFixed, design_px(58.0f));
+        caps_headers_row(ink);
+        return true;
+    };
+
+    // What the shader's uniform blocks are called in its own language.
+    const ShaderDesc* desc = app.project().find_shader(doc->id);
+    const bool glsl = desc != nullptr && app.project().language_of(*desc) == Language::GLSL;
+
     // --- uniforms ----------------------------------------------------------
     for (const auto& block : reflection.uniform_blocks) {
-        std::string header = block.name;
+        SectionHeader header;
+        header.title = block.name;
         if (show_registers) {
-            header += "  (space" + std::to_string(block.set) + ", b" +
-                      std::to_string(block.binding) + ", " + std::to_string(block.size) + " B)";
+            header.meta = "space" + std::to_string(block.set) + " \xC2\xB7 b" +
+                          std::to_string(block.binding) + " \xC2\xB7 " + std::to_string(block.size) +
+                          " B";
         }
-        if (!ImGui::CollapsingHeader(header.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) continue;
-
-        if (ImGui::BeginTable("##uniforms", 5,
-                              ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_RowBg)) {
-            ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch, 0.28f);
-            ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthStretch, 0.14f);
-            ImGui::TableSetupColumn("Source", ImGuiTableColumnFlags_WidthStretch, 0.18f);
-            ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch, 0.32f);
-            ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, 60.0f);
-            ImGui::TableHeadersRow();
-
+        header.tag = glsl ? "uniform" : "cbuffer";
+        const std::string id = "##uniforms_" + block.name;
+        if (section_begin(id.c_str(), header, ink) && begin_bindings_table("##uniforms", "Type")) {
             for (const auto& member : block.members) {
                 const std::string key = block.name + "." + member.name;
-                changed |= binding_row(app, doc->id, "uniform", key, &member,
-                                       bindings.uniforms[key]);
+                changed |= binding_row(app, doc->id, member.c_type(), std::string(), key, &member,
+                                       bindings.uniforms[key], ink);
             }
             ImGui::EndTable();
         }
+        section_end();
     }
 
     // --- resources ---------------------------------------------------------
-    if (!reflection.resources.empty() &&
-        ImGui::CollapsingHeader("Resources", ImGuiTreeNodeFlags_DefaultOpen)) {
-        if (ImGui::BeginTable("##resources", 5,
-                              ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_RowBg)) {
-            ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch, 0.28f);
-            ImGui::TableSetupColumn("Kind", ImGuiTableColumnFlags_WidthStretch, 0.14f);
-            ImGui::TableSetupColumn("Source", ImGuiTableColumnFlags_WidthStretch, 0.18f);
-            ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch, 0.32f);
-            ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, 60.0f);
-            ImGui::TableHeadersRow();
+    if (!reflection.resources.empty()) {
+        // How many of them someone has bound to something, and which register
+        // space they share when they share one - which they almost always do.
+        int bound = 0;
+        bool one_space = true;
+        for (const auto& resource : reflection.resources) {
+            one_space = one_space && resource.set == reflection.resources.front().set;
+            const auto& group = resource.kind == ResourceKind::StorageBuffer ? bindings.buffers
+                                                                             : bindings.textures;
+            const std::uint32_t elements =
+                resource.kind == ResourceKind::SampledTexture ? resource_slot_count(resource) : 1u;
+            for (std::uint32_t element = 0; element < elements; ++element) {
+                const std::string key = resource.kind == ResourceKind::SampledTexture
+                                            ? resource_binding_key(resource, element)
+                                            : resource.name;
+                const auto it = group.find(key);
+                if (it != group.end() && it->second.source != BindingSource::Default) ++bound;
+            }
+        }
 
+        SectionHeader header;
+        header.title = "Resources";
+        if (show_registers && one_space) {
+            header.meta = "space" + std::to_string(reflection.resources.front().set);
+        }
+        header.tag = std::to_string(bound) + " bound";
+        if (section_begin("##resources_section", header, ink) &&
+            begin_bindings_table("##resources", "Kind")) {
             const TextureFeed resolved = evaluate_textures(app);
             for (const auto& resource : reflection.resources) {
                 // An array of textures gets a row per element: they are separate
@@ -1016,50 +1121,77 @@ void draw_io_panel(App& app) {
                         resource.kind == ResourceKind::SampledTexture
                             ? resource_binding_key(resource, element)
                             : resource.name;
-                    std::string kind = std::string(to_string(resource.kind));
+                    std::string detail;
                     if (show_registers) {
-                        kind += " (space" + std::to_string(resource.set) + ", " +
-                                std::to_string(resource.binding + element) + ")";
+                        detail = "space" + std::to_string(resource.set) + ", " +
+                                 std::to_string(resource.binding + element);
                     }
                     // What the binding actually resolved to, said where the row can
                     // show it. A texture that is missing, still decoding or in a
                     // slot nothing can fill otherwise just looks like white.
                     if (const auto it = resolved.by_name.find(row_key);
                         it != resolved.by_name.end()) {
+                        std::string state;
                         if (it->second.status == TextureStatus::Ready) {
-                            kind += " - " + std::to_string(it->second.width) + "x" +
+                            state = std::to_string(it->second.width) + "x" +
                                     std::to_string(it->second.height);
                         } else if (it->second.status != TextureStatus::Unbound) {
-                            kind += " - " + std::string(to_string(it->second.status));
+                            state = std::string(to_string(it->second.status));
                         }
+                        if (!state.empty()) detail += (detail.empty() ? "" : " \xC2\xB7 ") + state;
                     }
                     auto& group = resource.kind == ResourceKind::StorageBuffer ? bindings.buffers
                                                                                : bindings.textures;
-                    changed |= binding_row(app, doc->id, kind.c_str(), row_key, nullptr,
-                                           group[row_key], &resource);
+                    changed |= binding_row(app, doc->id, std::string(to_string(resource.kind)),
+                                           detail, row_key, nullptr, group[row_key], ink, &resource);
                 }
             }
             ImGui::EndTable();
         }
+        section_end();
     }
 
     // --- vertex inputs and outputs ----------------------------------------
-    if (!reflection.vertex_inputs.empty() && ImGui::CollapsingHeader("Vertex inputs")) {
-        for (const auto& input : reflection.vertex_inputs) {
-            ImGui::BulletText("%u  %s%s%s  ->  %s", input.location, input.name.c_str(),
-                              input.semantic.empty() ? "" : " : ", input.semantic.c_str(),
-                              input.sdl_vertex_format().c_str());
+    if (!reflection.vertex_inputs.empty()) {
+        SectionHeader header;
+        header.title = "Vertex inputs";
+        header.meta = std::to_string(reflection.vertex_inputs.size()) +
+                      (reflection.vertex_inputs.size() == 1 ? " attribute" : " attributes");
+        header.tag = "input layout";
+        header.default_open = false;
+        if (section_begin("##vertex_inputs", header, ink)) {
+            ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + section_content_width());
+            for (const auto& input : reflection.vertex_inputs) {
+                MonoScope mono(12.0f);
+                ImGui::BulletText("%u  %s%s%s  ->  %s", input.location, input.name.c_str(),
+                                  input.semantic.empty() ? "" : " : ", input.semantic.c_str(),
+                                  input.sdl_vertex_format().c_str());
+            }
+            ImGui::TextDisabled(
+                "The preview generates its geometry in the shader, so these are documented rather "
+                "than bound. The build emits a matching SDL_GPUVertexInputState snippet.");
+            ImGui::PopTextWrapPos();
+            ImGui::Dummy(ImVec2(0.0f, design_px(4.0f)));
         }
-        ImGui::TextDisabled(
-            "The preview generates its geometry in the shader, so these are documented rather "
-            "than bound. The build emits a matching SDL_GPUVertexInputState snippet.");
+        section_end();
     }
 
-    if (!reflection.outputs.empty() && ImGui::CollapsingHeader("Outputs")) {
-        for (const auto& output : reflection.outputs) {
-            ImGui::BulletText("SV_Target%u  %s (%u components)", output.location,
-                              output.name.c_str(), output.components);
+    if (!reflection.outputs.empty()) {
+        SectionHeader header;
+        header.title = "Outputs";
+        header.meta = std::to_string(reflection.outputs.size()) +
+                      (reflection.outputs.size() == 1 ? " target" : " targets");
+        header.tag = "SV_Target" + std::to_string(reflection.outputs.front().location);
+        header.default_open = false;
+        if (section_begin("##outputs", header, ink)) {
+            for (const auto& output : reflection.outputs) {
+                MonoScope mono(12.0f);
+                ImGui::BulletText("SV_Target%u  %s (%u components)", output.location,
+                                  output.name.c_str(), output.components);
+            }
+            ImGui::Dummy(ImVec2(0.0f, design_px(4.0f)));
         }
+        section_end();
     }
 
     if (doc->stage == Stage::Compute) {
