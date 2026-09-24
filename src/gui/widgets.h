@@ -47,11 +47,23 @@ struct ThemeInk {
     ImU32 subtle = 0;
     ImU32 strong = 0;
 
+    /// The accent as a fill: the primary button, a progress bar. Not for text
+    /// or thin marks - a theme may make it dark, the way the built-in dark
+    /// theme does; accent_ink is the accent for those.
     ImU32 accent = 0;
     ImU32 accent_hover = 0;
     ImU32 accent_active = 0;
     /// The accent at low opacity: selected rows, "locked", active chips.
     ImU32 accent_muted = 0;
+    /// The accent as ink: accent-coloured text, dots, outlines and bars,
+    /// readable against the panels.
+    ImU32 accent_ink = 0;
+
+    /// A selection: the fill behind a selected entry, and the text on it. The
+    /// selected page in Settings is drawn in these, so a theme sets how it
+    /// looks with the select.bg and select.ink roles.
+    ImU32 select_bg = 0;
+    ImU32 select_ink = 0;
 
     /// Compile and diagnostic states. Taken from the theme's [diagnostics]
     /// table rather than the status roles, so they agree with the colours the
@@ -213,6 +225,10 @@ void overlay_frame(ImDrawList* draw_list, const ImVec2& min, const ImVec2& max,
 /// A string ending in "..." when it would not fit `max_width`, measured in the
 /// current font.
 std::string fit_text(std::string_view text, float max_width);
+
+/// The same, cut from the front: "...projects/clean-bloom". For paths, whose
+/// end is the part that says which one it is.
+std::string fit_text_left(std::string_view text, float max_width);
 
 /// A right arrow in the current font when it has one, and "->" when it does
 /// not - the built-in font stops at Latin-1, and a missing glyph draws as a

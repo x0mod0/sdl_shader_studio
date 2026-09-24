@@ -151,5 +151,5 @@ stats_ink = "#a3adb2"
 [font]
 ui = "fonts/IBMPlexSans-Regular.ttf"
 editor = "fonts/JetBrainsMono-Regular.ttf"
-ui_size = 13.0
-editor_size = 13.0
+ui_size = 16.0
+editor_size = 16.0

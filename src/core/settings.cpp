@@ -331,6 +331,12 @@ bool load_settings(const std::filesystem::path& path, AppSettings& out, Diagnost
         u.show_register_hints = (*t)["show_register_hints"].value_or(u.show_register_hints);
         u.confirm_on_close_dirty = (*t)["confirm_on_close_dirty"].value_or(u.confirm_on_close_dirty);
         u.ui_scale = static_cast<float>((*t)["ui_scale"].value_or(u.ui_scale));
+        u.font_size = static_cast<float>((*t)["font_size"].value_or(u.font_size));
+        // Out of range reads as unset rather than as the nearest end: a size
+        // nobody could have picked in the app is more likely a typo than a wish.
+        if (u.font_size != 0.0f && (u.font_size < kMinUiFontSize || u.font_size > kMaxUiFontSize)) {
+            u.font_size = 0.0f;
+        }
         if (const auto* sc = (*t)["shortcuts"].as_table()) {
             for (const auto& [k, v] : *sc) {
                 u.shortcuts[std::string(k.str())] = v.value_or(std::string());
@@ -530,6 +536,7 @@ bool save_settings(const std::filesystem::path& path, const AppSettings& in,
     os << "show_register_hints = " << (u.show_register_hints ? "true" : "false") << "\n";
     os << "confirm_on_close_dirty = " << (u.confirm_on_close_dirty ? "true" : "false") << "\n";
     os << "ui_scale = " << u.ui_scale << "\n";
+    os << "font_size = " << u.font_size << "  # interface text in px; 0 = the theme's size\n";
     if (!u.shortcuts.empty()) {
         os << "\n[ui.shortcuts]\n";
         for (const auto& [k, v] : u.shortcuts) os << k << " = \"" << escape(v) << "\"\n";

@@ -247,3 +247,31 @@ TEST(recent_projects_are_recovered_from_where_they_used_to_be_written) {
     CHECK(out.recent_projects.size() == 1);
     CHECK(out.recent_projects.front() == std::filesystem::path("/projects/one/project.toml"));
 }
+
+// The interface text size is the user's, so it has to come back exactly as it
+// was set - and "not set" has to come back as not set, or the theme's own
+// suggestion would stop applying after one save.
+TEST(the_interface_text_size_survives_a_round_trip) {
+    ssstudio::AppSettings in;
+    in.ui.font_size = 16.0f;
+    CHECK(round_trip(in, "settings-text-size").ui.font_size == 16.0f);
+
+    in.ui.font_size = 0.0f;
+    CHECK(round_trip(in, "settings-text-size-unset").ui.font_size == 0.0f);
+}
+
+// A size nobody could have picked in the app reads as unset rather than being
+// pulled to the nearest end: a hand-edited 130 is more likely a typo for 13
+// than a wish for 22.
+TEST(an_interface_text_size_out_of_range_reads_as_unset) {
+    const std::filesystem::path path = settings_file("settings-text-size-range");
+    {
+        std::ofstream file(path, std::ios::binary | std::ios::trunc);
+        file << "[ui]\n"
+             << "font_size = 130\n";
+    }
+    ssstudio::AppSettings out;
+    ssstudio::Diagnostics diags;
+    CHECK(ssstudio::load_settings(path, out, diags));
+    CHECK(out.ui.font_size == 0.0f);
+}

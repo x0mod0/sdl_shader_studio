@@ -370,16 +370,22 @@ inline void same_line_right_aligned(float item_width) {
 /// cursor and the tooltip are for - and the tooltip says "Copied" for a moment
 /// afterwards, because a copy with no visible effect is one you do again to be
 /// sure it happened.
-inline void copyable_path(const std::string& text, bool dim = true) {
+///
+/// `shown`, when given, is what is drawn in place of `text` - a shortened form
+/// for a narrow space. The click still copies `text` whole, and the tooltip
+/// shows it, since a shortened path is no use anywhere else.
+inline void copyable_path(const std::string& text, bool dim = true,
+                          const std::string& shown = std::string()) {
     // What the last click copied, and when. One pair for the whole interface:
     // only one path can have been the last one clicked.
     static std::string copied;
     static double copied_at = 0.0;
 
+    const std::string& drawn = shown.empty() ? text : shown;
     if (dim) {
-        ImGui::TextDisabled("%s", text.c_str());
+        ImGui::TextDisabled("%s", drawn.c_str());
     } else {
-        ImGui::TextUnformatted(text.c_str());
+        ImGui::TextUnformatted(drawn.c_str());
     }
 
     if (ImGui::IsItemHovered()) {
@@ -394,7 +400,12 @@ inline void copyable_path(const std::string& text, bool dim = true) {
     // tooltip that fires every time the pointer crosses a row on its way down a
     // list is a tooltip you learn to read past.
     const bool just_copied = copied == text && ImGui::GetTime() - copied_at < 1.5;
-    ImGui::SetItemTooltip("%s", just_copied ? "Copied" : "Click to copy");
+    const char* hint = just_copied ? "Copied" : "Click to copy";
+    if (drawn != text) {
+        ImGui::SetItemTooltip("%s\n%s", text.c_str(), hint);
+    } else {
+        ImGui::SetItemTooltip("%s", hint);
+    }
 }
 
 /// Wraps every Text* call in the enclosing window - or, inside a table, in the

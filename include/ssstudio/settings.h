@@ -3,6 +3,7 @@
 #ifndef SSSTUDIO_SETTINGS_H
 #define SSSTUDIO_SETTINGS_H
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <filesystem>
@@ -51,6 +52,24 @@ const std::vector<std::string>& syntax_palette_names();
 inline constexpr float kDefaultEditorFontSize = 15.0f;
 inline constexpr float kMinEditorFontSize = 8.0f;
 inline constexpr float kMaxEditorFontSize = 40.0f;
+
+/// The interface's text size, in pixels before ui_scale: the range Settings >
+/// UI offers, the same range a theme pack's [font] ui_size may suggest, and
+/// the size a theme that suggests none is drawn at.
+inline constexpr float kMinUiFontSize = 11.0f;
+inline constexpr float kMaxUiFontSize = 22.0f;
+inline constexpr float kDefaultUiFontSize = 16.0f;
+
+/// The interface text size in effect: the user's own when they have set one,
+/// the theme's suggestion when they have not, and the default when the theme
+/// makes none - always within range. The one place that order is written, so
+/// the style, the fonts and the Settings page cannot disagree about it.
+inline float ui_font_size_in_effect(float user_size, float theme_suggestion) {
+    const float size = user_size > 0.0f         ? user_size
+                       : theme_suggestion > 0.0f ? theme_suggestion
+                                                 : kDefaultUiFontSize;
+    return std::clamp(size, kMinUiFontSize, kMaxUiFontSize);
+}
 
 struct EditorSettings {
     std::string font_path;          // empty == bundled font
@@ -197,7 +216,14 @@ struct UiSettings {
     bool restore_session = true;
     bool show_register_hints = true;
     bool confirm_on_close_dirty = true;
+    /// Everything larger or smaller: text, padding, controls.
     float ui_scale = 1.0f;
+    /// The interface's text size in pixels, before ui_scale. Zero means "what
+    /// the theme suggests" (its [font] ui_size), and failing that
+    /// kDefaultUiFontSize - see ui_font_size_in_effect(). The person at the keyboard outranks the
+    /// theme here, as with the editor font: a text size is often an
+    /// accessibility choice, and a theme change must not undo it.
+    float font_size = 0.0f;
     std::map<std::string, std::string> shortcuts;  // action -> chord
 };
 

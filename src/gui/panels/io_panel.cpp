@@ -693,7 +693,7 @@ bool binding_row(App& app, const std::string& shader_id, const std::string& type
                               binding.locked ? with_alpha(ink.accent, 0.24f)
                                              : ImGui::GetColorU32(ImGuiCol_HeaderHovered));
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, with_alpha(ink.accent, 0.3f));
-        ImGui::PushStyleColor(ImGuiCol_Text, binding.locked ? ink.accent : ink.muted);
+        ImGui::PushStyleColor(ImGuiCol_Text, binding.locked ? ink.accent_ink : ink.muted);
         if (ImGui::SmallButton(label)) {
             binding.locked = !binding.locked;
             changed = true;

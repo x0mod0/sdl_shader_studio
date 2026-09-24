@@ -439,6 +439,11 @@ The byte-level details are in [`docs/PACK_FORMAT.md`](../PACK_FORMAT.md).
 | **F8** | Pin the current version for comparison |
 | **Delete** (node graph) | Remove the selected node |
 
+On macOS, **Ctrl** in these shortcuts is **Cmd**, and the File, Build, Window,
+View and Info menus are in the menu bar at the top of the screen rather than in
+the window. Settings and Quit are in the **SS Studio** menu there, where Mac
+apps keep them.
+
 ---
 
 **Next:** [Running the app](RUNNING_THE_APP.md) ·

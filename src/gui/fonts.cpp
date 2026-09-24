@@ -20,9 +20,15 @@ void FontLibrary::request(const FontChoice& choice) {
     pending_ = true;
 }
 
-ImFont* FontLibrary::builtin() {
-    if (builtin_ == nullptr) builtin_ = ImGui::GetIO().Fonts->AddFontDefault();
-    return builtin_;
+ImFont* FontLibrary::builtin(float size) {
+    ImFontAtlas* atlas = ImGui::GetIO().Fonts;
+    if (builtin_ == nullptr) builtin_ = atlas->AddFontDefaultBitmap();
+    // The size the pixel font was drawn for. Anything else would scale its
+    // pixels, which is the blur the scalable version exists to avoid.
+    constexpr float kBitmapSize = 13.0f;
+    if (size <= 0.0f || size == kBitmapSize) return builtin_;
+    if (builtin_scalable_ == nullptr) builtin_scalable_ = atlas->AddFontDefaultVector();
+    return builtin_scalable_;
 }
 
 ImFont* FontLibrary::load(const std::filesystem::path& path, std::vector<std::string>& problems) {
@@ -51,7 +57,7 @@ std::vector<std::string> FontLibrary::apply() {
 
     // First, so it is the atlas's first font whatever else is loaded: ImGui
     // falls back to Fonts[0], and that should be a font that always exists.
-    ImFont* fallback = builtin();
+    ImFont* fallback = builtin(wanted_.size);
 
     ImFont* ui = load(wanted_.ui, problems);
     ImFont* mono = load(wanted_.mono, problems);

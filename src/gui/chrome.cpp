@@ -13,6 +13,7 @@
 #include <imgui_internal.h>  // BeginViewportSideBar, and the menu bar's rectangle
 
 #include "app.h"
+#include "native_menu.h"
 #include "panels/panel_common.h"
 #include "preview/renderer.h"
 #include "widgets.h"
@@ -104,7 +105,7 @@ ProjectHealth project_health(const ProjectSession& session) {
 ImU32 health_color(ProjectHealth health, const ThemeInk& ink) {
     switch (health) {
         case ProjectHealth::Idle: return ink.muted;
-        case ProjectHealth::Compiling: return ink.accent;
+        case ProjectHealth::Compiling: return ink.accent_ink;
         case ProjectHealth::Clean: return ink.ok;
         case ProjectHealth::Warnings: return ink.warn;
         case ProjectHealth::Errors: return ink.error;
@@ -189,10 +190,14 @@ void App::draw_top_bar(const ThemeInk& ink) {
                   mark);
     ImGui::Dummy(ImVec2(mark, 0.0f));
 
-    draw_menu_bar();
+    if (native_menu::available()) {
+        // The menus are in the system menu bar (App::frame), so the pills
+        // follow the mark directly.
+        ImGui::Dummy(ImVec2(design_px(4.0f), 0.0f));
+    } else {
+        draw_menu_bar();
 
-    // The rule between "what the app can do" and "what is open in it".
-    {
+        // The rule between "what the app can do" and "what is open in it".
         const float x = std::floor(ImGui::GetCursorScreenPos().x + design_px(4.0f)) + 0.5f;
         const float rule = design_px(18.0f);
         const float y = bar.Min.y + (bar.GetHeight() - rule) * 0.5f;
@@ -531,6 +536,41 @@ void App::draw_status_bar(const ThemeInk& ink) {
         const float dot_gap = design_px(6.0f);
         ImGui::SetCursorPosY(std::floor((height - ImGui::GetTextLineHeight()) * 0.5f));
 
+        // --- right: where the caret is, what is being drawn, and with what -----
+        // Measured before the left half is drawn, so the project path there
+        // knows how much room it may take.
+        struct Part {
+            std::string text;
+            ImU32 color = 0;
+        };
+        std::vector<Part> parts;
+        if (build_busy_) {
+            const std::string who = building_project_name();
+            parts.push_back({who.empty() ? "Building..." : "Building " + who + "...", ink.accent_ink});
+        }
+        if (project_open()) {
+            if (const Document* doc = active_document(); doc != nullptr && show_editor) {
+                parts.push_back({"Ln " + std::to_string(doc->cursor_line) + ", Col " +
+                                     std::to_string(doc->cursor_column),
+                                 ink.muted});
+            }
+            if (const PreviewPipeline* pipeline = project().active_pipeline()) {
+                // The image pass counts: "3 passes" for two buffers and the image.
+                const std::size_t passes = pipeline->passes.size() + 1;
+                parts.push_back({pipeline->name + " \xC2\xB7 " +
+                                     counted(static_cast<int>(passes), "pass", "passes"),
+                                 ink.muted});
+            }
+        }
+        if (preview_ && preview_->ready()) {
+            parts.push_back({format_display_name(preview_->preview_format()), ink.muted});
+        }
+        parts.push_back({backend_name_, ink.muted});
+
+        float right_width = 0.0f;
+        for (const Part& part : parts) right_width += ImGui::CalcTextSize(part.text.c_str()).x;
+        right_width += group_gap * static_cast<float>(parts.size() - 1);
+
         // --- left: what state the project is in, and which project it is ------
         const auto dotted = [&](ImU32 color, const std::string& text) {
             status_dot(color);
@@ -557,7 +597,7 @@ void App::draw_status_bar(const ThemeInk& ink) {
             }
 
             if (compiling) {
-                dotted(ink.accent, "Compiling...");
+                dotted(ink.accent_ink, "Compiling...");
             } else if (errors > 0 || warnings > 0) {
                 if (errors > 0) dotted(ink.error, counted(errors, "error", "errors"));
                 if (errors > 0 && warnings > 0) ImGui::SameLine(0.0f, group_gap);
@@ -575,41 +615,14 @@ void App::draw_status_bar(const ThemeInk& ink) {
             // Aligned to the 12px line it sits on rather than to its own smaller
             // one, so the baselines agree.
             ImGui::SetCursorPosY(std::floor((height - ImGui::GetTextLineHeight()) * 0.5f));
-            copyable_path(short_path(project().root));
+            // Shortened from the front when it would run into the right half:
+            // the end of a path is what says which project it is. A click
+            // still copies all of it.
+            const std::string path = short_path(project().root);
+            const float room =
+                width - design_px(12.0f) - right_width - group_gap - ImGui::GetCursorPosX();
+            copyable_path(path, true, fit_text_left(path, std::max(room, text_width("...") * 2.0f)));
         }
-
-        // --- right: where the caret is, what is being drawn, and with what -----
-        struct Part {
-            std::string text;
-            ImU32 color = 0;
-        };
-        std::vector<Part> parts;
-        if (build_busy_) {
-            const std::string who = building_project_name();
-            parts.push_back({who.empty() ? "Building..." : "Building " + who + "...", ink.accent});
-        }
-        if (project_open()) {
-            if (const Document* doc = active_document(); doc != nullptr && show_editor) {
-                parts.push_back({"Ln " + std::to_string(doc->cursor_line) + ", Col " +
-                                     std::to_string(doc->cursor_column),
-                                 ink.muted});
-            }
-            if (const PreviewPipeline* pipeline = project().active_pipeline()) {
-                // The image pass counts: "3 passes" for two buffers and the image.
-                const std::size_t passes = pipeline->passes.size() + 1;
-                parts.push_back({pipeline->name + " \xC2\xB7 " +
-                                     counted(static_cast<int>(passes), "pass", "passes"),
-                                 ink.muted});
-            }
-        }
-        if (preview_ && preview_->ready()) {
-            parts.push_back({format_display_name(preview_->preview_format()), ink.muted});
-        }
-        parts.push_back({backend_name_, ink.muted});
-
-        float right_width = 0.0f;
-        for (const Part& part : parts) right_width += ImGui::CalcTextSize(part.text.c_str()).x;
-        right_width += group_gap * static_cast<float>(parts.size() - 1);
 
         // Right-aligned, but never drawn back over the left half: on a window too
         // narrow for both, the right half follows the left and is clipped at the

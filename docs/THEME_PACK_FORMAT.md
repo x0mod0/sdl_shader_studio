@@ -19,7 +19,7 @@ It does not own content, and it does not own behaviour.
 |---|---|---|
 | Widget and panel colours | `preview.clear_color` | The clear colour is a *project* field (`project.h`), part of what the shader is being viewed against. A theme that changed it would change the picture, not the frame. |
 | Corner radii, padding, spacing | `DockingNodeHasCloseButton` | Set to `false` in `theme.cpp` because two close buttons a few pixels apart close different amounts. That is a safety decision wearing a style field's clothes. |
-| Syntax colours, diagnostic ink | `ui.ui_scale`, `editor.font_size` | Accessibility settings belong to the person at the keyboard. A pack may *suggest* a font (see `[font]`); it may not resize the interface. |
+| Syntax colours, diagnostic ink | `ui.ui_scale`, `ui.font_size`, `editor.font_size` | Accessibility settings belong to the person at the keyboard. A pack may *suggest* a font (see `[font]`); it may not resize the interface. |
 | A bundled font file | Any path outside the pack directory | Portability: a pack that reads `/Users/someone/…` works on exactly one machine. |
 | Preview chrome (checkerboard) | Anything under `[files]`, `[tools]`, `[build]` | Those are not looks. |
 
@@ -260,8 +260,8 @@ only role computed when absent is `ink.inverted`.
 | `accent.active` | Held/pressed variants | `darken($accent, 6%)` |
 | `accent.muted` | Docking preview, unsaved marker, nav highlight, alt table rows | `alpha($accent, 25%)` |
 | `accent.ink` | Check marks, links, the tab overline | `$ink.primary` |
-| `select.bg` | Text selection | `alpha($accent, 35%)` |
-| `select.ink` | Text inside a selection (unused by ImGui; the editor honours it) | `$ink.primary` |
+| `select.bg` | Text selection, and the selected page in the Settings list | `alpha($accent, 35%)` |
+| `select.ink` | Text inside a selection (unused by ImGui; the editor honours it), and the selected page's name in the Settings list | `$ink.primary` |
 | `status.ok` | "Compiled", "up to date", success counts | `#6fbf73` |
 | `status.warn` | Warnings, "modified", stale markers | `#e0af68` |
 | `status.error` | Errors, the destructive button, failed builds | `#eb6a6a` |
@@ -541,7 +541,7 @@ wins, because a font choice is often an accessibility choice.
 [font]
 ui = "fonts/Inter-Regular.ttf"
 editor = "fonts/JetBrainsMono-Regular.ttf"
-ui_size = 15.0            # 11 - 22, a suggestion; ui_scale still multiplies it
+ui_size = 15.0            # 11 - 22, a suggestion; 16 when unset. The user's text size wins, and ui_scale still multiplies it
 editor_size = 15.0        # honoured only when the user has not set a size
 ```
 

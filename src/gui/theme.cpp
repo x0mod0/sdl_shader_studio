@@ -151,7 +151,7 @@ void apply_pack_metrics(ImGuiStyle& style, const ThemeStyle& metrics) {
 // ---------------------------------------------------------------------------
 // Theme
 // ---------------------------------------------------------------------------
-void apply_theme(const ResolvedTheme& theme, float ui_scale) {
+void apply_theme(const ResolvedTheme& theme, float ui_scale, float ui_font_size) {
     ImGuiStyle& style = ImGui::GetStyle();
     // Back to ImGui's defaults first. ScaleAllSizes() below multiplies whatever
     // is already there, so re-applying a theme without this would compound the
@@ -177,11 +177,12 @@ void apply_theme(const ResolvedTheme& theme, float ui_scale) {
     apply_default_metrics(style);
     if (!theme.builtin) apply_pack_metrics(style, theme.style);
 
-    // A pack's suggested interface size. Only a suggestion, and only within
-    // the range the format allows: ui_scale below still multiplies it, so the
-    // person at the keyboard keeps the last word on how large things are.
-    // Left alone otherwise, which lets ImGui take it from the font itself.
-    if (theme.font_ui_size > 0.0f) style.FontSizeBase = std::clamp(theme.font_ui_size, 11.0f, 22.0f);
+    // The interface's text size: the user's own when they have chosen one, the
+    // pack's suggestion when they have not - a suggestion only, which is why it
+    // loses - and the app's default when there is neither. ui_scale below still
+    // multiplies it. Always set, rather than left for ImGui to take from the
+    // font, so every theme starts from the same size whatever font it uses.
+    style.FontSizeBase = ui_font_size_in_effect(ui_font_size, theme.font_ui_size);
 
     // A dock node draws its own close button at the right of the tab bar, on top
     // of the close button each tab already has. Two buttons a few pixels apart

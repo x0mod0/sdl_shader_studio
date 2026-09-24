@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cfloat>
+#include <cmath>
 #include <array>
 #include <iterator>
 #include <string_view>
@@ -38,6 +39,47 @@ bool input_path(const char* label, std::filesystem::path& value, const char* hin
     if (!input_string(label, text, hint)) return false;
     value = text;
     return true;
+}
+
+/// A slider whose value takes effect when it is let go, rather than on every
+/// frame it is dragged.
+///
+/// For the settings that resize the interface - this window included. Applied
+/// while dragging, each new size moves the slider under the pointer, the
+/// pointer then reads a different value off it, that value resizes everything
+/// again, and the window flickers between two sizes without settling on either
+/// - nor saving either. So the slider shows the value being dragged the whole
+/// time, and `value` changes only on the frame it is released, or a value typed
+/// into it with Ctrl+click is entered. Returns true on exactly that frame.
+///
+/// `slider` draws the widget itself, given the id to use and the value to show,
+/// so one helper serves float and integer sliders alike. The label is drawn in
+/// a column `column` wide and the slider is `width` wide, so a group of these
+/// line up with each other rather than each starting wherever its label ends.
+template <typename T, typename Slider>
+bool slider_applied_on_release(const char* label, float column, float width, T& value,
+                               Slider&& slider) {
+    // The value being dragged, per slider, while it is held. One entry at most
+    // in practice: only one slider can be held at a time.
+    static std::map<ImGuiID, T> held;
+    const float start = ImGui::GetCursorPosX();
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted(label);
+    ImGui::SameLine(start + column);
+    ImGui::SetNextItemWidth(width);
+    const std::string id = std::string("##") + label;
+    const ImGuiID key = ImGui::GetID(id.c_str());
+    const auto it = held.find(key);
+    T shown = it != held.end() ? it->second : value;
+    slider(id.c_str(), &shown);
+    const bool released = ImGui::IsItemDeactivatedAfterEdit();
+    if (ImGui::IsItemActive()) {
+        held[key] = shown;
+    } else {
+        held.erase(key);
+    }
+    if (released) value = shown;
+    return released;
 }
 
 bool string_list(const char* label, std::vector<std::string>& values) {
@@ -273,7 +315,7 @@ bool draw_reset_syntax(EditorSettings& e, const ResolvedTheme& theme, const Them
     ImGui::PushStyleColor(ImGuiCol_Button, with_alpha(ink.raised, 0.0f));
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ink.accent_muted);
     ImGui::PushStyleColor(ImGuiCol_ButtonActive, ink.accent_muted);
-    ImGui::PushStyleColor(ImGuiCol_Text, ink.accent);
+    ImGui::PushStyleColor(ImGuiCol_Text, ink.accent_ink);
     FontScope small(nullptr, 12.0f);
     const bool pressed = ImGui::SmallButton("Reset all to theme");
     ImGui::PopStyleColor(4);
@@ -320,7 +362,7 @@ bool theme_card(const ResolvedTheme& preview, const std::string& meta, bool sele
                              ImGui::GetColorU32(hovered ? ImGuiCol_HeaderHovered : ImGuiCol_Header),
                              rounding);
     if (selected) {
-        draw_list->AddRect(min, max, ink.accent, rounding, 0, 2.0f);
+        draw_list->AddRect(min, max, ink.accent_ink, rounding, 0, 2.0f);
     } else {
         draw_list->AddRect(min, max, hovered ? ink.strong : ink.subtle, rounding);
     }
@@ -833,8 +875,8 @@ constexpr SettingsPage kPages[] = {
                   "directories"},
     {"Formats", "pack container magic extension header preset entry order alignment keys "
                 "blobs table names reflection user section signature"},
-    {"Interface", "ui scale multi viewport windows register hints confirm closing unsaved "
-                  "session reopen shortcuts"},
+    {"UI", "interface scale text size font larger smaller zoom multi viewport windows "
+           "register hints confirm closing unsaved session reopen shortcuts"},
     {"Theme", "theme colors colours packs reload folder focus lint roles syntax palette "
               "keywords highlight pinned reset"},
 };
@@ -847,7 +889,7 @@ enum SettingsPageIndex : int {
     kToolsPage,
     kLanguagesPage,
     kFormatsPage,
-    kInterfacePage,
+    kUiPage,
     kThemePage,
 };
 static_assert(std::string_view(kPages[kThemePage].name) == "Theme",
@@ -864,8 +906,10 @@ bool page_matches(const SettingsPage& page, const char* query) {
     return haystack.find(needle) != std::string::npos;
 }
 
-/// One row of the settings list: the selected page carries the accent's tint
-/// and a bar of the accent down its left edge. Returns true when clicked.
+/// One row of the settings list. The selected page is drawn as a selection -
+/// the theme's select.bg behind it and its select.ink for the name, so a theme
+/// decides how it reads - with a bar of the accent's ink down its left edge.
+/// Returns true when clicked.
 bool settings_nav_item(const char* name, bool selected, const ThemeInk& ink) {
     const float height = design_px(30.0f);
     const float width = ImGui::GetContentRegionAvail().x;
@@ -877,13 +921,13 @@ bool settings_nav_item(const char* name, bool selected, const ThemeInk& ink) {
     ImDrawList* draw_list = ImGui::GetWindowDrawList();
     const float rounding = design_px(5.0f);
     if (selected) {
-        draw_list->AddRectFilled(min, max, ink.accent_muted, rounding);
-        draw_list->AddRectFilled(min, ImVec2(min.x + design_px(2.0f), max.y), ink.accent);
+        draw_list->AddRectFilled(min, max, ink.select_bg, rounding);
+        draw_list->AddRectFilled(min, ImVec2(min.x + design_px(2.0f), max.y), ink.accent_ink);
     } else if (hovered) {
         draw_list->AddRectFilled(min, max, ImGui::GetColorU32(ImGuiCol_HeaderHovered), rounding);
     }
     draw_list->AddText(ImVec2(min.x + design_px(12.0f), min.y + (height - ImGui::GetTextLineHeight()) * 0.5f),
-                       selected ? ink.accent : (hovered ? ink.text : ink.soft), name);
+                       selected ? ink.select_ink : (hovered ? ink.text : ink.soft), name);
     return clicked;
 }
 
@@ -1013,14 +1057,89 @@ void draw_settings_panel(App& app) {
         case kFormatsPage:
             changed |= draw_pack_layout_settings(settings.pack_layout, app.theme());
             break;
-        case kInterfacePage: {
+        case kUiPage: {
             // The scale lives in the style, which is only rebuilt by
-            // apply_theme - so moving this has to ask for that rebuild, the
-            // same as changing the theme does.
-            if (ImGui::SliderFloat(left_label("UI scale").c_str(), &settings.ui.ui_scale, 0.75f,
-                                   2.0f, "%.2f")) {
+            // apply_theme - so a new scale has to ask for that rebuild, the
+            // same as changing the theme does. Both sliders on this page resize
+            // the window they are in, so both apply when they are let go (see
+            // slider_applied_on_release).
+            //
+            // Both sliders share a label column and a width, measured from the
+            // room there is: wide enough to drag with precision, and never so
+            // wide that the button beside the second one is pushed out of the
+            // window.
+            const ImGuiStyle& style = ImGui::GetStyle();
+            const char* reset_label = "Use the theme's size";
+            const float column =
+                std::max(text_width("UI scale"), text_width("Text size")) + style.ItemSpacing.x * 2.0f;
+            const float reset_width = button_width(reset_label);
+            const float room = ImGui::GetContentRegionAvail().x - column;
+            const float slider_width = std::clamp(room - style.ItemSpacing.x - reset_width,
+                                                  std::min(room, design_px(140.0f)),
+                                                  design_px(420.0f));
+            const bool reset_fits = slider_width + style.ItemSpacing.x + reset_width <= room;
+            const float page_left = ImGui::GetCursorPosX();
+
+            if (slider_applied_on_release("UI scale", column, slider_width, settings.ui.ui_scale,
+                                          [](const char* id, float* v) {
+                                              ImGui::SliderFloat(id, v, 0.75f, 2.0f, "%.2f");
+                                          })) {
                 changed = true;
                 theme_changed = true;
+            }
+            ImGui::SetItemTooltip(
+                "Everything larger or smaller: text, spacing and controls.\n"
+                "Takes effect when you let go of the slider.");
+
+            // The text alone. Shown at the size in effect, so the slider starts
+            // where the text already is; moving it makes the size the user's own,
+            // which then outlasts a change of theme, and the button beside it
+            // hands the choice back to the theme.
+            // What the theme would give with no size of the user's own: its
+            // suggestion, or the default when it makes none.
+            const float theme_size = ui_font_size_in_effect(0.0f, app.theme().font_ui_size);
+            //
+            // A float slider shown in whole pixels rather than an integer one:
+            // ImGui makes an integer slider's grab one step wide, which over a
+            // range this short covers the number it is meant to be showing. The
+            // value is rounded when it is applied.
+            float text_size = settings.ui.font_size > 0.0f ? settings.ui.font_size : theme_size;
+            if (slider_applied_on_release("Text size", column, slider_width, text_size,
+                                          [](const char* id, float* v) {
+                                              ImGui::SliderFloat(id, v, kMinUiFontSize,
+                                                                 kMaxUiFontSize, "%.0f px");
+                                          })) {
+                settings.ui.font_size = std::round(text_size);
+                changed = true;
+                theme_changed = true;
+            }
+            ImGui::SetItemTooltip(
+                "The size of the interface's text, without enlarging anything else.\n"
+                "UI scale above still multiplies it. The editor has a size of its own,\n"
+                "on the Editor page. Takes effect when you let go of the slider.");
+            // Beside the slider while there is room for it, under it when the
+            // window is too narrow - never cut off at the window's edge.
+            if (reset_fits) {
+                ImGui::SameLine();
+            } else {
+                ImGui::SetCursorPosX(page_left + column);
+            }
+            ImGui::BeginDisabled(settings.ui.font_size <= 0.0f);
+            if (ImGui::SmallButton(reset_label)) {
+                settings.ui.font_size = 0.0f;
+                changed = true;
+                theme_changed = true;
+            }
+            ImGui::EndDisabled();
+            {
+                // Under the slider it describes, not under its label.
+                FontScope small(nullptr, 12.0f);
+                ImGui::SetCursorPosX(page_left + column);
+                if (settings.ui.font_size > 0.0f) {
+                    ImGui::TextDisabled("Your own size. The theme suggests %.0f px.", theme_size);
+                } else {
+                    ImGui::TextDisabled("The theme's size. Move the slider to choose your own.");
+                }
             }
             changed |= ImGui::Checkbox("Multi-viewport windows", &settings.ui.multi_viewport);
             changed |= ImGui::Checkbox("Show register hints", &settings.ui.show_register_hints);
@@ -1034,10 +1153,24 @@ void draw_settings_panel(App& app) {
                     "A project path on the command line takes precedence.");
             }
             ImGui::SeparatorText("Shortcuts");
-            for (const auto& action : app.actions()) {
-                if (action.shortcut.empty()) continue;
-                ImGui::BulletText("%-28s %s", action.label.c_str(), action.shortcut.c_str());
+            // A table rather than padded text: the interface font is
+            // proportional, so spaces cannot line the keys up in a column. No
+            // wrapping inside it - the page wraps at its edge, and a column
+            // sized to fit its text would otherwise be measured from text
+            // already wrapped to that column, and shrink to a letter wide.
+            ImGui::PushTextWrapPos(-1.0f);
+            if (ImGui::BeginTable("##shortcuts", 2, ImGuiTableFlags_SizingFixedFit)) {
+                for (const auto& action : app.actions()) {
+                    if (action.shortcut.empty()) continue;
+                    ImGui::TableNextRow();
+                    ImGui::TableNextColumn();
+                    ImGui::TextUnformatted(action.label.c_str());
+                    ImGui::TableNextColumn();
+                    mono_text(action.shortcut, ink.soft, 12.0f);
+                }
+                ImGui::EndTable();
             }
+            ImGui::PopTextWrapPos();
             break;
         }
         case kThemePage:

@@ -24,6 +24,11 @@ struct FontChoice {
     /// Code, identifiers, paths and numbers: the editor, and every place the
     /// interface shows something the user would type or copy.
     std::filesystem::path mono;
+    /// The interface text size in pixels, or zero for the font's own. Matters
+    /// only to the built-in font: ImGui has it as a pixel font drawn for 13px,
+    /// which blurs at any other size, and as a scalable version of the same
+    /// design that does not - so a size other than 13 gets the scalable one.
+    float size = 0.0f;
 
     bool operator==(const FontChoice&) const = default;
 };
@@ -66,9 +71,10 @@ private:
     /// missing file is reported once rather than on every theme change.
     ImFont* load(const std::filesystem::path& path, std::vector<std::string>& problems);
 
-    /// ImGui's own font, added on first use so it is always the atlas's first
-    /// entry - the one ImGui itself falls back to.
-    ImFont* builtin();
+    /// ImGui's own font for a text size, added on first use. The pixel font
+    /// is always added first, whichever is asked for, so it is the atlas's
+    /// first entry - the one ImGui itself falls back to.
+    ImFont* builtin(float size);
 
     FontChoice wanted_;
     bool pending_ = false;
@@ -76,7 +82,9 @@ private:
     /// Every file tried so far, keyed by its path as given. Null for a file
     /// that could not be read.
     std::map<std::filesystem::path, ImFont*> loaded_;
+    /// The pixel font drawn for 13px, and the scalable one for other sizes.
     ImFont* builtin_ = nullptr;
+    ImFont* builtin_scalable_ = nullptr;
     ImFont* ui_ = nullptr;
     ImFont* mono_ = nullptr;
 };

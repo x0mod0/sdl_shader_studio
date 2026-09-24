@@ -25,6 +25,11 @@ option(SSSTUDIO_WITH_AVIF       "Also decode AVIF (pulls dav1d and aom)" OFF)
 if(WIN32)
     enable_language(RC)
 endif()
+# The same goes for Objective-C++, which the macOS menu bar is written in
+# (src/gui/native_menu_mac.mm): AppKit has no C or C++ interface.
+if(APPLE)
+    enable_language(OBJCXX)
+endif()
 
 include(cmake/Dependencies.cmake)
 include(cmake/AppIcon.cmake)
@@ -145,6 +150,7 @@ if(SSSTUDIO_BUILD_GUI AND TARGET SDL3::SDL3)
         src/gui/chrome.cpp
         src/gui/theme.cpp
         src/gui/fonts.cpp
+        src/gui/menu_model.cpp
         src/gui/widgets.cpp
         src/gui/panels/editor_panel.cpp
         src/gui/panels/io_panel.cpp
@@ -165,6 +171,16 @@ if(SSSTUDIO_BUILD_GUI AND TARGET SDL3::SDL3)
         "${CMAKE_CURRENT_SOURCE_DIR}/src/gui"
         ${IMGUI_INCLUDE_DIRS})
     target_link_libraries(sdl_shader_studio PRIVATE ssstudio_core SDL3::SDL3)
+    # The menus go in the system menu bar where there is one, and stay in the
+    # window's top bar everywhere else.
+    if(APPLE)
+        target_sources(sdl_shader_studio PRIVATE src/gui/native_menu_mac.mm)
+        set_source_files_properties(src/gui/native_menu_mac.mm PROPERTIES
+            COMPILE_OPTIONS "-fobjc-arc")
+        target_link_libraries(sdl_shader_studio PRIVATE "-framework AppKit")
+    else()
+        target_sources(sdl_shader_studio PRIVATE src/gui/native_menu_other.cpp)
+    endif()
     if(TARGET SDL3_image::SDL3_image)
         target_link_libraries(sdl_shader_studio PRIVATE SDL3_image::SDL3_image)
         target_compile_definitions(sdl_shader_studio PRIVATE SSSTUDIO_HAVE_SDL_IMAGE)

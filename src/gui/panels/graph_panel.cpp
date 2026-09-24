@@ -561,7 +561,7 @@ void draw_graph_panel(App& app) {
         }
         const char* note = "Shader file is generated from this graph";
         row.next(text_width(note) + design_px(18.0f));
-        pill_label(note, ink.accent, with_alpha(ink.accent, 0.12f));
+        pill_label(note, ink.accent_ink, with_alpha(ink.accent_ink, 0.12f));
     }
 
     // The settings of the graph itself, against the right edge as one group

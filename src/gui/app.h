@@ -29,6 +29,7 @@
 
 #include "file_dialog.h"
 #include "fonts.h"
+#include "menu_model.h"
 #include "widgets.h"
 #include "scene/scene.h"
 
@@ -228,8 +229,9 @@ public:
     void shutdown();
 
     /// Called once per frame before ImGui::NewFrame(): the one point where the
-    /// font atlas can be changed without a frame half-built around the old
-    /// fonts. Loads whatever apply_current_theme() or a font setting asked for.
+    /// font atlas and the style can be changed without a frame half-built
+    /// around the old ones. Applies whatever apply_current_theme() or a font
+    /// setting asked for.
     void before_frame();
 
     // Called once per frame between ImGui::NewFrame() and ImGui::Render().
@@ -359,8 +361,9 @@ public:
     /// an edit, when the user has asked for that.
     void window_focus_gained();
 
-    /// Resolves settings_.editor.color_theme and hands it to ImGui. Also
-    /// refreshes the syntax colours the user has not pinned, which is what
+    /// Resolves settings_.editor.color_theme, and has ImGui's style rebuilt
+    /// from it - and from the scale and text size - before the next frame.
+    /// Also refreshes the syntax colours the user has not pinned, which is what
     /// makes a theme change apply to the editor as well as to the chrome, and
     /// asks for the theme's fonts (see request_fonts()).
     void apply_current_theme();
@@ -660,6 +663,10 @@ private:
     void draw_top_bar(const ThemeInk& ink);
     /// The menus, drawn into the top bar's menu bar.
     void draw_menu_bar();
+    /// Every menu the app has, as data: what draw_menu_bar() draws with ImGui,
+    /// and what goes into the system menu bar instead where there is one (see
+    /// native_menu.h). One description, so the two cannot drift apart.
+    std::vector<Menu> build_menus();
     /// The open projects as pills, from the cursor to `right_edge`. Replaces
     /// the tab row that used to sit between the menus and the panels.
     void draw_project_tabs(const ThemeInk& ink, float right_edge);
@@ -740,6 +747,10 @@ private:
 
     /// The interface and code fonts, swapped between frames.
     FontLibrary fonts_;
+
+    /// The style is to be rebuilt from theme_ before the next frame. Set by
+    /// apply_current_theme(), acted on by before_frame().
+    bool style_pending_ = false;
 
     /// See theme_previews(). Empty until first asked for, and emptied whenever
     /// the set of packs is re-read.
@@ -963,7 +974,9 @@ void draw_graph_panel(App& app);
 void draw_scene_panel(App& app);
 
 // Theme (src/gui/theme.cpp).
-void apply_theme(const ResolvedTheme& theme, float ui_scale);
+/// Applies a resolved theme to ImGui's style. `ui_font_size` is the user's
+/// own interface text size, or zero to take the theme's.
+void apply_theme(const ResolvedTheme& theme, float ui_scale, float ui_font_size = 0.0f);
 
 }  // namespace ssstudio::gui
 

@@ -377,7 +377,16 @@ void open_containing_directory(App& app, const std::filesystem::path& file) {
 /// the bar, and neither should come out in the code font with pill padding.
 class PillTabStyle {
 public:
-    explicit PillTabStyle(const ThemeInk& ink) : ink_(ink) { push(); }
+    /// The fills are taken from the theme's own button colours, read here
+    /// before anything is pushed: a selected pill is filled the way a button
+    /// is, which is what makes it read as the one that is on.
+    explicit PillTabStyle(const ThemeInk& ink)
+        : ink_(ink),
+          selected_fill_(ImGui::GetColorU32(ImGuiCol_Button)),
+          selected_hover_fill_(ImGui::GetColorU32(ImGuiCol_ButtonHovered)),
+          hover_fill_(with_alpha(ink.raised, 0.0f)) {
+        push();
+    }
     ~PillTabStyle() {
         if (pushed_) pop();
     }
@@ -391,6 +400,17 @@ public:
         if (!pushed_) push();
     }
 
+    /// The colours of the one tab about to be submitted, from which of its
+    /// three states it is in. ImGui paints any tab under the pointer in the
+    /// hover colour, the selected one included - so the selected tab gets a
+    /// hover colour of its own, a step up from its fill, and keeps looking
+    /// selected while it is pointed at. Undone by pop_item().
+    void push_item(bool selected, bool hovered) {
+        ImGui::PushStyleColor(ImGuiCol_Text, selected || hovered ? ink_.text : ink_.soft);
+        ImGui::PushStyleColor(ImGuiCol_TabHovered, selected ? selected_hover_fill_ : hover_fill_);
+    }
+    void pop_item() { ImGui::PopStyleColor(2); }
+
 private:
     void push() {
         const ImU32 clear = with_alpha(ink_.raised, 0.0f);
@@ -400,11 +420,11 @@ private:
         ImGui::PushStyleVar(ImGuiStyleVar_TabBorderSize, 0.0f);
         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(design_px(10.0f), design_px(7.0f)));
         ImGui::PushStyleColor(ImGuiCol_Tab, clear);
-        ImGui::PushStyleColor(ImGuiCol_TabHovered, ImGui::GetColorU32(ImGuiCol_HeaderHovered));
-        ImGui::PushStyleColor(ImGuiCol_TabSelected, ink_.sunken);
+        ImGui::PushStyleColor(ImGuiCol_TabHovered, hover_fill_);
+        ImGui::PushStyleColor(ImGuiCol_TabSelected, selected_fill_);
         ImGui::PushStyleColor(ImGuiCol_TabSelectedOverline, clear);
         ImGui::PushStyleColor(ImGuiCol_TabDimmed, clear);
-        ImGui::PushStyleColor(ImGuiCol_TabDimmedSelected, ink_.sunken);
+        ImGui::PushStyleColor(ImGuiCol_TabDimmedSelected, selected_fill_);
         ImGui::PushStyleColor(ImGuiCol_TabDimmedSelectedOverline, clear);
         ImGui::PushFont(mono_font(), type_size(12.0f));
         // The close button only under the pointer, on the selected tab as on
@@ -425,9 +445,21 @@ private:
     }
 
     const ThemeInk& ink_;
+    /// The selected pill, the selected pill under the pointer, and any other
+    /// pill under the pointer. The last is no fill at all: a pointed-at tab is
+    /// outlined instead (see draw_tab_decorations), so the one filled pill in
+    /// the row is always the selected one - and ImGui fills a tab with its top
+    /// corners rounded only, which reads as a tab rather than a pill.
+    ImU32 selected_fill_ = 0;
+    ImU32 selected_hover_fill_ = 0;
+    ImU32 hover_fill_ = 0;
     bool pushed_ = false;
     float saved_close_width_ = 0.0f;
 };
+
+/// The stage suffix's size: a step below the name, and no smaller, so "frag"
+/// and "vert" stay readable at a glance rather than only on inspection.
+constexpr float kTabSuffixSize = 11.0f;
 
 /// What a shader tab's dot says: a failed compile first, because that is what
 /// the dot is for, then warnings, then unsaved edits. Zero for nothing to say.
@@ -436,7 +468,7 @@ ImU32 tab_status_color(const Document& doc, const ThemeInk& ink) {
     for (const auto& d : doc.diagnostics) {
         if (d.severity == Severity::Warning) return ink.warn;
     }
-    if (doc.dirty) return ink.accent;
+    if (doc.dirty) return ink.accent_ink;
     return 0;
 }
 
@@ -446,7 +478,7 @@ ImU32 tab_status_color(const Document& doc, const ThemeInk& ink) {
 std::string tab_label_padding(const char* suffix) {
     float needed = 0.0f;
     {
-        FontScope small(mono_font(), 10.5f);
+        FontScope small(mono_font(), kTabSuffixSize);
         needed = ImGui::CalcTextSize(suffix).x;
     }
     needed += design_px(8.0f);
@@ -466,17 +498,25 @@ void draw_tab_decorations(const std::string& name, const char* suffix, bool sele
     const ImVec2 padding = ImGui::GetStyle().FramePadding;
     ImDrawList* draw_list = ImGui::GetWindowDrawList();
     draw_list->PushClipRect(min, max, true);
+    // ImGui trims a pixel off the top of every tab so it can sit flush against
+    // the bar's edge; the outlines follow the same shape. The selected pill
+    // takes the strong line, as half of what says which shader is in front;
+    // one under the pointer takes the subtle one and no fill, so pointing at a
+    // tab can never be mistaken for having selected it.
     if (selected) {
-        // ImGui trims a pixel off the top of every tab so it can sit flush
-        // against the bar's edge; the outline follows the same shape.
+        draw_list->AddRect(ImVec2(min.x, min.y + 1.0f), max, ink.strong, design_px(5.0f));
+    } else if (hovered) {
         draw_list->AddRect(ImVec2(min.x, min.y + 1.0f), max, ink.subtle, design_px(5.0f));
     }
     const float center_y = (min.y + 1.0f + max.y) * 0.5f;
     {
+        // A step quieter than the name in every state, never so quiet it
+        // cannot be read: the stage is what tells two shaders of one name
+        // apart.
         const float x = min.x + padding.x + ImGui::CalcTextSize(name.c_str()).x + design_px(8.0f);
-        FontScope small(mono_font(), 10.5f);
+        FontScope small(mono_font(), kTabSuffixSize);
         draw_list->AddText(ImVec2(x, center_y - ImGui::GetTextLineHeight() * 0.5f),
-                           selected ? ink.muted : with_alpha(ink.muted, 0.7f), suffix);
+                           selected || hovered ? ink.soft : ink.muted, suffix);
     }
     // Where TabItemEx puts the close button: its own frame padding in from the
     // right edge, a font size wide.
@@ -783,7 +823,7 @@ void draw_editor_panel(App& app) {
             // never hides that it holds edits.
             const ImU32 dot = tab_status_color(doc, ink);
             const std::string name =
-                display_name(doc) + (doc.dirty && dot != ink.accent ? " *" : "");
+                display_name(doc) + (doc.dirty && dot != ink.accent_ink ? " *" : "");
             const std::string label = name + tab_label_padding(stage_label(doc.stage)) + "###" +
                                       session_key + '\x1f' + doc.id;
             ImGuiTabItemFlags flags = ImGuiTabItemFlags_None;
@@ -797,9 +837,13 @@ void draw_editor_panel(App& app) {
             // needs no confirmation even with unsaved edits in the buffer.
             bool keep_open = true;
             const bool in_front = doc.id == current_id;
-            if (!in_front) ImGui::PushStyleColor(ImGuiCol_Text, ink.muted);
+            // Whether the pointer is on this tab, known before it is drawn: the
+            // tab's id is its label hashed inside the bar, and the hovered id
+            // is last frame's until an item claims it this frame.
+            const bool pointed_at = ImGui::GetHoveredID() == ImGui::GetID(label.c_str());
+            pill_style->push_item(in_front, pointed_at);
             const bool tab_open = ImGui::BeginTabItem(label.c_str(), &keep_open, flags);
-            if (!in_front) ImGui::PopStyleColor();
+            pill_style->pop_item();
             submitted.emplace_back(doc.id, ImGui::GetItemID());
             if (!keep_open) request.close.push_back(doc.id);
             draw_tab_decorations(name, stage_label(doc.stage), tab_open, dot, ink);

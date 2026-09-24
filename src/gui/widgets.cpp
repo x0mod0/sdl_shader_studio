@@ -124,6 +124,9 @@ ThemeInk::ThemeInk(const ResolvedTheme& theme) {
     accent_hover = role("accent.hover");
     accent_active = role("accent.active");
     accent_muted = role("accent.muted");
+    accent_ink = role("accent.ink");
+    select_bg = role("select.bg");
+    select_ink = role("select.ink");
     ok = theme_u32(theme.success());
     warn = theme_u32(theme.diagnostic(Severity::Warning));
     error = theme_u32(theme.diagnostic(Severity::Error));
@@ -548,6 +551,22 @@ std::string fit_text(std::string_view text, float max_width) {
         if (ImGui::CalcTextSize(out.c_str()).x + dots <= max_width) break;
     }
     return out + "...";
+}
+
+std::string fit_text_left(std::string_view text, float max_width) {
+    if (max_width <= 0.0f) return {};
+    std::string out(text);
+    if (ImGui::CalcTextSize(out.c_str()).x <= max_width) return out;
+    const float dots = ImGui::CalcTextSize("...").x;
+    std::size_t start = 0;
+    while (start < out.size()) {
+        // Whole UTF-8 sequences only, as in fit_text().
+        do {
+            ++start;
+        } while (start < out.size() && (static_cast<unsigned char>(out[start]) & 0xC0) == 0x80);
+        if (ImGui::CalcTextSize(out.c_str() + start).x + dots <= max_width) break;
+    }
+    return "..." + out.substr(start);
 }
 
 const char* arrow_glyph() {
